@@ -99,7 +99,7 @@ async def analyze(images: list[UploadFile] = File(...)) -> AnalysisReport:
 async def export_report(req: ExportRequest) -> ExportResponse:
     pdf_bytes = pdf_service.render(req.report)
     reports.save(req.report.id, pdf_bytes)
-    base = get_settings().public_base_url.rstrip("/")
+    base = get_settings().resolved_base_url.rstrip("/")
     return ExportResponse(
         report_id=req.report.id,
         download_url=f"{base}/reports/{req.report.id}",
@@ -125,7 +125,7 @@ async def email_report(req: EmailRequest) -> EmailResponse:
     """
     pdf_bytes = pdf_service.render(req.report)
     reports.save(req.report.id, pdf_bytes)
-    base = get_settings().public_base_url.rstrip("/")
+    base = get_settings().resolved_base_url.rstrip("/")
     link = f"{base}/reports/{req.report.id}"
     log.info("Stub-email to %s — link %s", req.email, link)
     return EmailResponse(
