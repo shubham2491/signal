@@ -77,6 +77,10 @@ async def analyze(images: list[bytes]) -> AnalysisReport:
         keywords=top_level["keywords"],
         reads=reads,
         groups=groups,
+        palette=top_level.get("palette", []),
+        price_strategy=top_level.get("price_strategy", ""),
+        production_notes=top_level.get("production_notes", ""),
+        merchandising=top_level.get("merchandising", ""),
     )
 
 
@@ -100,6 +104,10 @@ async def _build_section(reads: list[ImageRead], mode: Mode) -> dict:
         "commentary": commentary["commentary"],
         "directions": directions,
         "keywords": commentary["keywords"],
+        "palette": commentary.get("palette", []),
+        "price_strategy": commentary.get("price_strategy", ""),
+        "production_notes": commentary.get("production_notes", ""),
+        "merchandising": commentary.get("merchandising", ""),
     }
 
 

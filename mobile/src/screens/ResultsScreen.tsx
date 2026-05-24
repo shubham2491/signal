@@ -77,12 +77,55 @@ export function ResultsScreen() {
           </Card>
         ) : null}
 
+        {/* SECTION 3b: Palette */}
+        {report.palette && report.palette.length > 0 ? (
+          <Card style={{ marginTop: spacing.lg }}>
+            <Kicker>Palette</Kicker>
+            <View style={styles.paletteRow}>
+              {report.palette.map((c) => (
+                <View key={c} style={styles.swatchWrap}>
+                  <View style={[styles.swatch, { backgroundColor: colorToHex(c) }]} />
+                  <Text style={styles.swatchLabel}>{c}</Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+        ) : null}
+
+        {/* SECTION 3c: Price strategy */}
+        {report.price_strategy ? (
+          <Card style={[styles.priceCard, { marginTop: spacing.lg }]}>
+            <Kicker color={colors.emerald}>Price Strategy</Kicker>
+            <Text style={styles.priceText}>{report.price_strategy}</Text>
+          </Card>
+        ) : null}
+
+        {/* SECTION 3d: Production + Merchandising side-by-side feel */}
+        {report.production_notes || report.merchandising ? (
+          <View style={{ marginTop: spacing.lg, gap: spacing.md }}>
+            {report.production_notes ? (
+              <Card>
+                <Kicker>Production Notes</Kicker>
+                <Text style={styles.subBlockText}>{report.production_notes}</Text>
+              </Card>
+            ) : null}
+            {report.merchandising ? (
+              <Card>
+                <Kicker>Merchandising</Kicker>
+                <Text style={styles.subBlockText}>{report.merchandising}</Text>
+              </Card>
+            ) : null}
+          </View>
+        ) : null}
+
         {/* SECTION 4: Recommended Directions as tinted cards */}
         <View style={{ marginTop: spacing.xl }}>
           <Kicker>Recommended Directions</Kicker>
           <View style={{ height: spacing.md }} />
           {report.directions.map((d) => {
             const meta = DIRECTION_META[d.label] || DIRECTION_META.fallback;
+            const metaBits = [d.price_band_inr, d.complexity ? `${d.complexity} to make` : '', d.timing]
+              .filter(Boolean) as string[];
             return (
               <View key={d.label} style={[styles.dirCard, { backgroundColor: meta.tint }]}>
                 <View style={styles.dirCardHead}>
@@ -90,6 +133,15 @@ export function ResultsScreen() {
                 </View>
                 <Text style={styles.dirCardTitle}>{d.title}</Text>
                 <Text style={styles.dirCardDesc}>{d.description}</Text>
+                {metaBits.length ? (
+                  <View style={styles.dirMetaRow}>
+                    {metaBits.map((m, idx) => (
+                      <View key={idx} style={styles.dirMetaPill}>
+                        <Text style={styles.dirMetaText}>{m}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
               </View>
             );
           })}
@@ -255,6 +307,47 @@ export function ResultsScreen() {
   );
 }
 
+// Best-effort named-color → hex. Falls back to a soft warm grey so the
+// swatch still renders as a coloured chip when the model returns a
+// niche trade name we don't have a mapping for.
+const NAMED_COLORS: Record<string, string> = {
+  // neutrals
+  'ecru': '#E8DFCB', 'cream': '#F1E8D1', 'off-white': '#F5F1E6', 'ivory': '#F6EFDB',
+  'sand': '#D9C4A0', 'stone': '#B8AE9E', 'taupe': '#A89484', 'mushroom': '#A89C8A',
+  'charcoal': '#3A3A38', 'jet': '#1A1A18', 'black': '#0F0F0E', 'white': '#FFFFFF',
+  // earth / rust
+  'rust': '#A74C2A', 'terracotta': '#B96B47', 'burnt sienna': '#9D4A2A',
+  'sienna': '#A0522D', 'brick': '#9C4A3B', 'clay': '#B07758', 'camel': '#B9925A',
+  'tobacco': '#7A4A2D', 'umber': '#6B4423',
+  // greens
+  'olive': '#6B6A2E', 'sage': '#9CAA8A', 'forest': '#2D4F3A', 'kerala green': '#1F5F4A',
+  'moss': '#7A8A4A', 'mint': '#B5D4C3', 'fern': '#5B7A4A',
+  // blues
+  'indigo': '#2D3E70', 'navy': '#1F2C4A', 'denim': '#4A6D8C', 'sky': '#8AB0CC',
+  'cobalt': '#2D4FB8', 'rinse': '#243B5A', 'midnight': '#0F1B2E',
+  // warm / pink
+  'blush': '#E8C2BC', 'rose': '#C77A7A', 'dusty rose': '#C4928D', 'coral': '#E37868',
+  'salmon': '#E0866A', 'peach': '#F0BFA0',
+  // yellow / gold
+  'mustard': '#C99B30', 'gold': '#C5A04B', 'ochre': '#C28A30', 'butter': '#E8D085',
+  // purple
+  'plum': '#6B3A55', 'aubergine': '#3F2438', 'lavender': '#B7AAC8',
+  // red
+  'red': '#B23A2E', 'burgundy': '#7A2A2A', 'wine': '#5C1F1F', 'tomato': '#C84A33',
+  // grey
+  'grey': '#8A8780', 'gray': '#8A8780', 'dove': '#B7B3A8', 'graphite': '#4D4D49',
+};
+
+function colorToHex(name: string): string {
+  const k = name.trim().toLowerCase();
+  if (NAMED_COLORS[k]) return NAMED_COLORS[k];
+  // try a partial match against the longest key (e.g. "burnt sienna red" → "burnt sienna")
+  for (const key of Object.keys(NAMED_COLORS).sort((a, b) => b.length - a.length)) {
+    if (k.includes(key)) return NAMED_COLORS[key];
+  }
+  return '#C9C2B0';
+}
+
 const DIRECTION_META: Record<string, { tint: string; color: string; glyph: string }> = {
   'Safe Commercial':     { tint: colors.safeTint,  color: colors.emerald, glyph: '◆' },
   'Trend Forward':       { tint: colors.trendTint, color: colors.burgundy, glyph: '↗' },
@@ -323,6 +416,31 @@ const styles = StyleSheet.create({
   dirCardLabel: { ...type.caption, letterSpacing: 1.2 },
   dirCardTitle: { ...type.h2, color: colors.text, marginTop: spacing.xs },
   dirCardDesc: { ...type.body, color: colors.text, marginTop: spacing.xs, opacity: 0.85 },
+  dirMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: spacing.md },
+  dirMetaPill: {
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.6)',
+  },
+  dirMetaText: { ...type.bodySm, fontSize: 11, color: colors.text, fontWeight: '500' },
+
+  // Palette swatches
+  paletteRow: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md,
+    marginTop: spacing.md,
+  },
+  swatchWrap: { alignItems: 'flex-start', minWidth: 64 },
+  swatch: {
+    width: 56, height: 56, borderRadius: radii.sm,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: colors.divider,
+  },
+  swatchLabel: { ...type.bodySm, fontSize: 11, color: colors.text, marginTop: 6 },
+
+  // Price strategy callout
+  priceCard: { backgroundColor: colors.emeraldSoft },
+  priceText: { ...type.body, color: colors.text, marginTop: spacing.sm, lineHeight: 22 },
+
+  // Production / Merchandising
+  subBlockText: { ...type.body, color: colors.text, marginTop: spacing.sm, lineHeight: 22 },
 
   detailToggle: { alignSelf: 'center', paddingVertical: spacing.lg },
   detailToggleText: { ...type.bodySm, color: colors.emerald, textDecorationLine: 'underline' },

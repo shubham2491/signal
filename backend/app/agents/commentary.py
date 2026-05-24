@@ -1,11 +1,16 @@
 """Commentary Agent.
 
-Takes pooled vision facets + per-brand search snippets and produces:
-  - an editorial observation (one phrase, eg "Oversized Minimal Casualwear")
-  - a short summary line
-  - brand signals (Strong / Adjacent / Moderate / Weak) with rationale
-  - a short market commentary paragraph (1-3 sentences, no essays)
-  - top keywords
+Builds the actionable brief for an Indian fast-fashion designer.
+
+Persona: a designer at Zudio / Westside / Pantaloons-level who wants to
+translate ASPIRATIONAL global looks (Zara / H&M / Uniqlo / COS / Mango)
+into AFFORDABLE Indian floor sets (INR 499-1,799).
+
+Output adds four actionable structured fields beyond the editorial brief:
+  - palette          : 4-6 named trade colors
+  - price_strategy   : INR price ladder (aspirational anchor → Indian competitive → recommended)
+  - production_notes : fabric / complexity / trim spec
+  - merchandising    : adjacent SKUs + shelf strategy
 """
 from __future__ import annotations
 
@@ -19,48 +24,69 @@ from app.services.llm import get_llm
 log = logging.getLogger(__name__)
 
 
-SYSTEM = """You are SIGNAL's Commentary Agent, writing for designers and
-buyers in INDIAN fashion retail (value and mid-premium tiers).
+SYSTEM = """You are SIGNAL's Commentary Agent for an Indian fast-fashion
+designer working at Zudio / Westside / Pantaloons-level retail.
 
-Brand signals you receive may include both Indian brands (Zudio,
-Westside, Snitch, AND, Biba, Allen Solly, etc.) AND globally accessible
-brands present/benchmarked in India (Zara, COS, Uniqlo, Mango,
-Massimo Dutti, etc.). Reference any of them where useful.
+Your reader wants to translate ASPIRATIONAL global looks (Zara, H&M,
+Uniqlo, COS, Mango, Massimo Dutti, Arket, & Other Stories, etc.) into
+AFFORDABLE Indian floor sets. The Indian competitive shelf is Zudio,
+Westside, Pantaloons, Max, Reliance Trends, Bewakoof, The Souled Store.
 
-COMMENTARY IS ALWAYS INDIAN-CONTEXT. Frame everything from the lens of
-Indian retail — never frame from a US/EU/UK consumer lens. Compare to
-how the floor would land at Indian tier-1 metros vs tier-2/3 cities.
+Every brief must speak from INDIAN retail context: tier-1 metros vs
+tier-2/3, festive / wedding / summer-weight cycles, INR price-bands
+(typically 499-1,799 for the value-to-mid floor), pan-India distribution.
 
-NEVER reference maison-tier luxury (Prada, Gucci, Chanel, LV, Hermes,
-Loewe, Bottega, Balenciaga, Jacquemus, Acne, Miu Miu). Not useful.
+NEVER reference maison luxury (Prada, Gucci, Chanel, Loewe, etc).
+NEVER reference Indian mid-tier branded labels not in the candidate set
+(Snitch, Wrogn, Allen Solly, AND, Biba, etc.) — they aren't useful
+comparators for this audience.
 
-MANDATORY in every commentary:
-  1. An explicit INR price-band call (e.g. "INR 999-1,799 sweet spot",
-     "premium-mass at INR 2,499-3,999", "value tier at INR 499-899").
-     The band should reflect where this product would actually retail in
-     India, not the global price.
-  2. A tier-1 vs tier-2/3 distribution take — does this work pan-India
-     or stay metro-only?
-  3. A seasonal/festive timing note where the inputs allow it
-     (summer-weight, festive window, wedding occasion, monsoon, etc.).
+Produce DETAILED, ACTIONABLE output across these fields:
 
-Be editorial, not analytical. No SaaS jargon, no bullet-point essays.
-2-4 short sentences total. Always identity-blind.
+1. observation: 3-7 word editorial headline.
+2. summary: one tight sentence (≤24 words) that names the look.
+3. brand_signals: one entry per candidate brand. Strong = could plausibly
+   be from that brand's current floor; Adjacent = same direction,
+   different positioning; Moderate = some shared facets; Weak =
+   divergent. Rationale ≤22 words, anchored to either the global
+   reference DNA or the Indian competitive reality.
+4. commentary: 3-5 sentences. Must call out (a) what's working
+   commercially, (b) the tier-1 vs tier-2/3 distribution take, (c)
+   season / festive timing.
+5. palette: 4-6 specific named trade colors ("ecru", "rust", "kerala
+   green", "burnt sienna" — never "light" / "dark" / "blue").
+6. price_strategy: a short paragraph (2-3 sentences) framing the INR
+   price ladder. MUST include three numbers: the aspirational anchor
+   price (e.g. "Zara INR 2,990"), the Indian competitive shelf price
+   (e.g. "Zudio INR 599-799"), and your RECOMMENDED MRP for the
+   designer's floor (e.g. "INR 999-1,299"). End with a one-line gap
+   reasoning — what's the margin / volume bet.
+7. production_notes: 1-2 sentences naming the fabric spec
+   (e.g. "200 gsm cotton jersey, brushed interior"), production
+   complexity (easy / medium / hard at scale), and the 1-2 critical
+   trim callouts that make the look.
+8. merchandising: 1-2 sentences on adjacent SKUs to drop alongside (so
+   the floor reads as a story, not a one-off) and a shelf-stack note.
+9. keywords: 6-10 short tokens a designer could feed into trend search.
 """.strip()
 
 SCHEMA = """
 {
-  "observation": "string (3-7 words, editorial)",
-  "summary": "string (one sentence, <= 22 words)",
+  "observation": "string (3-7 words)",
+  "summary": "string (one sentence, <= 24 words)",
   "brand_signals": [
     {
       "brand": "string (must be one of the input brand names)",
       "similarity": "Strong | Adjacent | Moderate | Weak",
-      "rationale": "string (<= 18 words)",
+      "rationale": "string (<= 22 words)",
       "citations": ["url"]
     }
   ],
-  "commentary": "string (1-3 sentences, plain prose)",
+  "commentary": "string (3-5 sentences, plain prose)",
+  "palette": ["string (named trade color, 4-6 total)"],
+  "price_strategy": "string (2-3 sentences with three INR numbers)",
+  "production_notes": "string (1-2 sentences: fabric + complexity + trims)",
+  "merchandising": "string (1-2 sentences: adjacent SKUs + shelf note)",
   "keywords": ["string"]
 }
 """.strip()
@@ -85,27 +111,20 @@ Mode: {mode}
 Image count: {len(reads)}
 
 Vision facets (pooled across images):
-  aesthetics: {", ".join(pooled["aesthetics"]) or "—"}
-  categories: {", ".join(pooled["categories"]) or "—"}
-  colors:     {", ".join(pooled["colors"]) or "—"}
-  silhouettes:{", ".join(pooled["silhouettes"]) or "—"}
-  market:     {", ".join(pooled["segments"]) or "—"}
-  keywords:   {", ".join(pooled["keywords"]) or "—"}
+  aesthetics:  {", ".join(pooled["aesthetics"]) or "—"}
+  categories:  {", ".join(pooled["categories"]) or "—"}
+  colors:      {", ".join(pooled["colors"]) or "—"}
+  silhouettes: {", ".join(pooled["silhouettes"]) or "—"}
+  market:      {", ".join(pooled["segments"]) or "—"}
+  keywords:    {", ".join(pooled["keywords"]) or "—"}
 
-Candidate Indian-retail brands with recent snippets (cite URLs you use):
+Candidate brand set (mix of global aspirational + Indian competitive shelf):
 
 {brand_block}
 
-Write the brief.
-- Commentary frames EVERYTHING from Indian retail context. MUST include
-  an explicit INR price band, a tier-1 vs tier-2/3 distribution take,
-  and a seasonal/festive timing note where facets allow.
-- Brand signals must cover ALL candidate brands. For each: Strong =
-  input could plausibly be from that brand's current floor at its
-  Indian price-point. Adjacent = different positioning, same direction.
-  Moderate = some shared facets. Weak = mostly divergent.
-- Brand signal rationales can reference either Indian floor positioning
-  or how a global brand (e.g. Zara/Uniqlo) would benchmark in India.
+Write the full actionable brief. Every section must be specific and
+designer-usable. Cite at least one web URL in brand_signals citations
+where it grounds your call.
 """.strip()
 
     try:
@@ -114,8 +133,7 @@ Write the brief.
         log.warning("Commentary LLM call failed, using mock: %s", e)
         return _mock_commentary(brands, pooled)
 
-    data = _sanitize(data, brands)
-    return data
+    return _sanitize(data, brands, pooled)
 
 
 def _pool(reads: list[ImageRead]) -> dict[str, list[str]]:
@@ -157,15 +175,20 @@ def _brand_block(brands: list[Brand], results: dict[str, list[dict]]) -> str:
     blocks: list[str] = []
     for b in brands:
         hits = results.get(b.name, []) or []
+        tier_label = {
+            "global_aspirational": "ASPIRATIONAL ANCHOR",
+            "india_competitive":   "INDIAN COMPETITIVE SHELF",
+            "india_premium":       "INDIAN PREMIUM / CRAFT",
+        }.get(b.segment, b.segment.upper())
         if hits:
             lines = [f"  - {h['title']} ({h['url']}): {h['snippet'][:160]}" for h in hits[:3]]
-            blocks.append(f"{b.name} ({b.segment}) — {b.domain}\n" + "\n".join(lines))
+            blocks.append(f"{b.name} [{tier_label}] — {b.domain}\n" + "\n".join(lines))
         else:
-            blocks.append(f"{b.name} ({b.segment}) — {b.domain}\n  (no fresh snippets — reason from brand DNA)")
+            blocks.append(f"{b.name} [{tier_label}] — {b.domain}\n  (no fresh snippets — reason from brand DNA)")
     return "\n\n".join(blocks)
 
 
-def _sanitize(data: dict[str, Any], brands: list[Brand]) -> dict[str, Any]:
+def _sanitize(data: dict[str, Any], brands: list[Brand], pooled: dict[str, list[str]]) -> dict[str, Any]:
     allowed_brands = {b.name for b in brands}
     sigs_raw = data.get("brand_signals") or []
     sigs: list[BrandSignal] = []
@@ -181,10 +204,9 @@ def _sanitize(data: dict[str, Any], brands: list[Brand]) -> dict[str, Any]:
         sigs.append(BrandSignal(
             brand=name,
             similarity=sim,  # type: ignore[arg-type]
-            rationale=str(s.get("rationale", ""))[:200],
+            rationale=str(s.get("rationale", ""))[:240],
             citations=[c for c in (s.get("citations") or []) if isinstance(c, str)][:3],
         ))
-    # Fill missing brands with weak placeholder so the UI shows the full shortlist
     for b in brands:
         if b.name not in seen:
             sigs.append(BrandSignal(
@@ -197,30 +219,56 @@ def _sanitize(data: dict[str, Any], brands: list[Brand]) -> dict[str, Any]:
         "summary": str(data.get("summary", "")).strip(),
         "brand_signals": [s.model_dump() for s in sigs],
         "commentary": str(data.get("commentary", "")).strip(),
+        "palette": [str(c) for c in (data.get("palette") or [])][:8] or pooled["colors"][:6],
+        "price_strategy": str(data.get("price_strategy", "")).strip(),
+        "production_notes": str(data.get("production_notes", "")).strip(),
+        "merchandising": str(data.get("merchandising", "")).strip(),
         "keywords": [str(k) for k in (data.get("keywords") or [])][:10],
     }
 
 
 def _mock_commentary(brands: list[Brand], pooled: dict[str, list[str]]) -> dict[str, Any]:
-    obs = " ".join(pooled["aesthetics"][:2] + pooled["categories"][:1]).title() or "Casual Mid-Premium Read"
+    obs = " ".join(pooled["aesthetics"][:2] + pooled["categories"][:1]).title() or "Quiet Casual Mid-Premium"
     sigs = []
-    aesthetic_phrase = pooled["aesthetics"][0] if pooled["aesthetics"] else "casual"
+    aesthetic_phrase = pooled["aesthetics"][0] if pooled["aesthetics"] else "casual contemporary"
     for i, b in enumerate(brands):
         sim = ["Strong", "Adjacent", "Moderate", "Moderate", "Weak"][min(i, 4)]
+        if b.segment == "global_aspirational":
+            rat = f"{b.name}'s current floor leans {aesthetic_phrase} — strong DNA to translate."
+        elif b.segment == "india_competitive":
+            rat = f"Where this would land on {b.name}'s floor at INR 599-999 today."
+        else:
+            rat = f"{b.name} runs the craft adjacency if the read tilts indo-fusion."
         sigs.append(BrandSignal(
             brand=b.name, similarity=sim,  # type: ignore[arg-type]
-            rationale=f"{b.name} runs similar {aesthetic_phrase} silhouettes on its current India floor.",
-            citations=[],
+            rationale=rat, citations=[],
         ).model_dump())
     return {
         "observation": obs,
-        "summary": "Oversized cotton silhouettes in a muted palette — mid-premium casualwear read.",
+        "summary": "Aspirational global silhouettes ready to translate into an INR 999-1,299 Indian floor.",
         "brand_signals": sigs,
         "commentary": (
-            "Reads as mid-premium casualwear — sits comfortably between Zudio's "
-            "fast-trend floor and Snitch/Wrogn's premium-youth positioning. "
-            "Tier-1 metro core, with strong potential carry-over to tier-2 cities "
-            "in the next refresh cycle. INR 999-1,799 sweet spot."
+            "Reads like a Zara / Mango current floor moment — proportions and palette are aspirational "
+            "but the underlying construction is well within Zudio / Westside's manufacturing reach. "
+            "Tier-1 metros lead on drop; tier-2/3 follows in 4-6 weeks once the silhouette is validated. "
+            "Best window is the late-summer to early-festive bridge."
         ),
-        "keywords": pooled["keywords"][:8] or ["oversized", "neutral", "casual", "drop-shoulder"],
+        "palette": pooled["colors"][:6] or ["ecru", "rust", "olive", "off-white", "burnt sienna"],
+        "price_strategy": (
+            "Aspirational anchor: Zara INR 2,990. Indian competitive shelf: "
+            "Zudio / Westside INR 599-899. Recommended MRP for this floor: "
+            "INR 999-1,299. The 30-40% gap to Zara is the headroom; matching "
+            "Zudio at INR 599 sacrifices margin without buying meaningful share."
+        ),
+        "production_notes": (
+            "200 gsm cotton jersey, brushed interior; medium complexity to "
+            "manufacture at scale. Critical trims: ribbed neck tape, centered "
+            "chest placement print, double-needle hem."
+        ),
+        "merchandising": (
+            "Drop alongside a wide-leg cargo and an open-weave knit so the "
+            "floor reads as a complete capsule, not a one-off. Stack 3 colors "
+            "deep on the lead SKU; the support SKUs in 2."
+        ),
+        "keywords": pooled["keywords"][:8] or ["oversized", "neutral", "minimal", "casual", "contemporary"],
     }

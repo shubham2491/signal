@@ -1,7 +1,8 @@
 """Recommendation Agent.
 
-Produces three actionable design directions: Safe Commercial, Trend Forward,
-Differentiated. Each is a 2-3 sentence designer brief, not a buzzword list.
+Produces three actionable design directions sized for an Indian
+fast-fashion designer (Zudio / Westside / Pantaloons level), each with
+an INR price band, production complexity tag, and a season/timing call.
 """
 from __future__ import annotations
 
@@ -14,30 +15,40 @@ from app.services.llm import get_llm
 log = logging.getLogger(__name__)
 
 
-SYSTEM = """You are SIGNAL's Recommendation Agent for Indian fashion
-designers and buyers (value and mid-premium retail — Zudio, Westside,
-Pantaloons, Allen Solly, AND, Snitch, Biba, Wrogn, etc.).
+SYSTEM = """You are SIGNAL's Recommendation Agent for an Indian fast-fashion
+designer (Zudio / Westside / Pantaloons-level retail).
 
-Given an observation and commentary, propose three design directions
-for the Indian floor set. Each direction is a tight, opinionated brief
-a designer could hand to a sampling team — concrete fabric / silhouette
-/ palette / INR price-band beats abstract trend talk.
+Given the observation, commentary, and keywords, write THREE directions
+the designer could hand directly to a sampling team. Each must be
+concrete on:
+  - the silhouette / fabric / palette bet
+  - an INR price-band sized for the Indian floor (typically INR 499-1,799)
+  - production complexity (easy / medium / hard at scale)
+  - season / festive window timing
 
-Reference Indian realities where relevant: summer-weight fabrics,
-festive/wedding occasion windows, tier-1 vs tier-2/3 distribution,
-ethnic/indo-fusion crossover potential, INR 499-1,999 (value) vs
-INR 1,999-4,999 (mid-premium) price thinking. Never anchor to European
-luxury houses.
+The three labels are FIXED: 'Safe Commercial', 'Trend Forward',
+'Differentiated Route'. Use Indian retail vocabulary (tier-1 metros,
+tier-2/3 carry-over, festive cycles, summer-weight fabrics). Never
+anchor to European luxury houses.
 
-Labels are fixed: 'Safe Commercial', 'Trend Forward', 'Differentiated Route'.
+Each direction's description is 2-3 sentences. Be designer-specific:
+fabric, gsm / weave, trim callouts, color story — not abstract trend
+talk.
 """.strip()
 
 SCHEMA = """
 {
   "directions": [
-    {"label": "Safe Commercial",       "title": "string (3-6 words)", "description": "string (2-3 sentences)"},
-    {"label": "Trend Forward",          "title": "string (3-6 words)", "description": "string (2-3 sentences)"},
-    {"label": "Differentiated Route",   "title": "string (3-6 words)", "description": "string (2-3 sentences)"}
+    {
+      "label": "Safe Commercial",
+      "title": "string (3-6 words)",
+      "description": "string (2-3 sentences with fabric / palette / trim specifics)",
+      "price_band_inr": "string (e.g. 'INR 799-1,099')",
+      "complexity": "easy | medium | hard",
+      "timing": "string (e.g. 'SS26 — drop in Feb for tier-1, May for tier-2/3')"
+    },
+    {"label": "Trend Forward", "...": "same shape"},
+    {"label": "Differentiated Route", "...": "same shape"}
   ]
 }
 """.strip()
@@ -53,7 +64,8 @@ Observation: {observation}
 Commentary:  {commentary}
 Keywords:    {", ".join(keywords) or "—"}
 
-Write three directions.
+Write three directions. Each MUST include price_band_inr, complexity,
+and timing — they're the difference between a brief and a wish list.
 """.strip()
 
     try:
@@ -69,10 +81,16 @@ Write three directions.
     raw = {d.get("label"): d for d in (data.get("directions") or []) if isinstance(d, dict)}
     for label in expected:
         d = raw.get(label) or {}
+        complexity = str(d.get("complexity", "")).strip().lower()
+        if complexity not in ("easy", "medium", "hard"):
+            complexity = ""
         out.append(Direction(
             label=label,  # type: ignore[arg-type]
             title=str(d.get("title", label))[:80],
-            description=str(d.get("description", ""))[:400] or _fallback_desc(label, observation),
+            description=str(d.get("description", ""))[:600] or _fallback_desc(label, observation),
+            price_band_inr=str(d.get("price_band_inr", ""))[:60],
+            complexity=complexity,  # type: ignore[arg-type]
+            timing=str(d.get("timing", ""))[:120],
         ))
     return out
 
@@ -83,17 +101,39 @@ def _mock(observation: str, keywords: list[str]) -> list[Direction]:
         Direction(
             label="Safe Commercial",
             title=f"Hero {observation}",
-            description=f"Run a tight capsule of {kw} pieces at INR 799-1,299. Volume play for tier-1 metros — Zudio / Pantaloons positioning. Stick to proven silhouettes; this is shelf-velocity, not noise.",
+            description=(
+                f"Capsule of {kw} pieces in 200 gsm cotton jersey, neutral palette "
+                f"(ecru, rust, off-white). Tier-1 metro volume play, deep stacks on the lead "
+                f"colors. Run the standard hem and chest-placement print."
+            ),
+            price_band_inr="INR 799-1,099",
+            complexity="easy",  # type: ignore[arg-type]
+            timing="Spring drop, Feb for tier-1; carry-over to tier-2/3 by May",
         ),
         Direction(
             label="Trend Forward",
             title="Push the proportion",
-            description="Take the same direction and exaggerate one variable — sleeve length, drop shoulder, or hem treatment. Limited drops at INR 1,799-2,499, Snitch / Wrogn / Westside price-band. Tier-1 first, watch sell-through before tier-2 push.",
+            description=(
+                "Exaggerate one variable from the safe capsule — drop shoulder by "
+                "1cm, lengthen sleeve to fingertip, or move to a heavier 240 gsm "
+                "brushed jersey. Limited drop in tier-1 metros; watch sell-through "
+                "before committing to tier-2 broadcast."
+            ),
+            price_band_inr="INR 1,299-1,799",
+            complexity="medium",  # type: ignore[arg-type]
+            timing="Early festive window — late August to early September",
         ),
         Direction(
             label="Differentiated Route",
             title="Indo-fusion craft story",
-            description="Lean into handloom textures, hand-block prints, or sustainable cotton — Nicobar / FabIndia adjacency. Higher margin, lower velocity. Festive window timing maximises pull.",
+            description=(
+                "Bring in handloom textures, hand-block prints, or sustainable cotton — "
+                "Nicobar / FabIndia adjacency. Higher margin, lower velocity, but builds "
+                "brand cred. Festive window timing maximises pull."
+            ),
+            price_band_inr="INR 1,499-1,999",
+            complexity="hard",  # type: ignore[arg-type]
+            timing="Festive (Oct-Nov) and wedding (Nov-Feb) windows",
         ),
     ]
 

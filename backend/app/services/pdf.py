@@ -146,11 +146,32 @@ def render(report: AnalysisReport, *, images: list[bytes] | None = None) -> byte
         story.append(Paragraph("MARKET COMMENTARY", s["section"]))
         story.append(Paragraph(report.commentary, s["body"]))
 
+    if report.palette:
+        story.append(Paragraph("PALETTE", s["section"]))
+        story.append(Paragraph(" &middot; ".join(report.palette), s["body"]))
+
+    if report.price_strategy:
+        story.append(Paragraph("PRICE STRATEGY", s["section"]))
+        story.append(Paragraph(report.price_strategy, s["body"]))
+
+    if report.production_notes:
+        story.append(Paragraph("PRODUCTION NOTES", s["section"]))
+        story.append(Paragraph(report.production_notes, s["body"]))
+
+    if report.merchandising:
+        story.append(Paragraph("MERCHANDISING", s["section"]))
+        story.append(Paragraph(report.merchandising, s["body"]))
+
     story.append(Paragraph("RECOMMENDED DIRECTIONS", s["section"]))
     for d in report.directions:
         story.append(Paragraph(d.label.upper(), s["dir_label"]))
         story.append(Paragraph(d.title, s["dir_title"]))
         story.append(Paragraph(d.description, s["body"]))
+        meta_bits = [b for b in [d.price_band_inr, (f"{d.complexity} to make" if d.complexity else ""), d.timing] if b]
+        if meta_bits:
+            story.append(Paragraph(
+                " &middot; ".join(meta_bits), s["brand_meta"],
+            ))
         story.append(Spacer(1, 6))
 
     if report.keywords:

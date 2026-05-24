@@ -70,6 +70,9 @@ class Direction(BaseModel):
     label: Literal["Safe Commercial", "Trend Forward", "Differentiated Route"]
     title: str
     description: str
+    price_band_inr: str = ""
+    complexity: Literal["easy", "medium", "hard", ""] = ""
+    timing: str = ""
 
 
 class GroupReport(BaseModel):
@@ -104,6 +107,11 @@ class AnalysisReport(BaseModel):
     reads: list[ImageRead] = []
     # Phase 2: populated when the upload spans 2+ category groups.
     groups: list[GroupReport] = []
+    # Phase 4: structured actionable layer for the designer.
+    palette: list[str] = []           # 4-6 named trade colors
+    price_strategy: str = ""          # INR ladder + gap reasoning
+    production_notes: str = ""        # fabric + complexity + trim spec
+    merchandising: str = ""           # adjacent SKUs + shelf strategy
 
 
 class ExportRequest(BaseModel):

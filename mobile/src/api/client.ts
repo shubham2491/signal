@@ -34,6 +34,9 @@ export type Direction = {
   label: 'Safe Commercial' | 'Trend Forward' | 'Differentiated Route';
   title: string;
   description: string;
+  price_band_inr?: string;
+  complexity?: 'easy' | 'medium' | 'hard' | '';
+  timing?: string;
 };
 
 export type ShotType =
@@ -86,6 +89,11 @@ export type AnalysisReport = {
   keywords: string[];
   reads: ImageRead[];
   groups?: GroupReport[];
+  // Phase 4 actionable layer
+  palette?: string[];
+  price_strategy?: string;
+  production_notes?: string;
+  merchandising?: string;
 };
 
 export type UploadImage = { uri: string; name: string; mime: string };
