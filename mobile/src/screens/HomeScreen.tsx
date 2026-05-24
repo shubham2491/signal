@@ -27,7 +27,7 @@ export function HomeScreen() {
         return;
       }
       const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsMultipleSelection: true,
         selectionLimit: 24,
         quality: 0.9,
@@ -49,7 +49,7 @@ export function HomeScreen() {
         return;
       }
       const res = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         quality: 0.9,
       });
       if (res.canceled || res.assets.length === 0) return;
