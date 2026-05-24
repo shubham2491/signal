@@ -155,22 +155,44 @@ async def analyze(images: list[bytes]) -> AnalysisReport:
 
 
 async def _build_section(reads: list[ImageRead], mode: Mode) -> dict:
-    """Run the brand → search → commentary → recommendation chain for a
-    set of reads. Returns the dict-shape the AnalysisReport expects."""
+    """Run brand selection, search, commentary, recommendation. Heavy
+    LLM work runs in parallel so wall-clock time is bounded by the
+    slowest single Gemini call instead of the sum of all of them."""
     brands = brand_selector.select(reads, top_k=5)
-    search_results = await search_agent.run(brands, reads)
-    commentary = await commentary_agent.run(
+
+    # Pool vision facets once so recommendation can run in parallel with
+    # commentary (rec no longer waits for editorial's observation).
+    pooled = commentary_agent.pool_reads(reads)
+
+    # Search runs in parallel with all LLM work — its result is only used
+    # by the commentary sub-agents for citations, and it's allowed to be
+    # empty if Tavily 403s. Fire it without awaiting yet.
+    search_task = asyncio.create_task(search_agent.run(brands, reads))
+
+    # Recommendation can fire immediately on pooled vision facets.
+    rec_task = asyncio.create_task(recommendation_agent.run(
+        observation="", commentary="",
+        keywords=pooled.get("keywords", []),
+        facets=pooled,
+    ))
+
+    # Wait for search briefly so commentary sub-agents have citations,
+    # but cap the wait — search isn't on the critical path.
+    try:
+        search_results = await asyncio.wait_for(search_task, timeout=8.0)
+    except (asyncio.TimeoutError, Exception) as e:
+        log.warning("search agent slow/failed (%s), proceeding without citations", e)
+        search_results = {b.name: [] for b in brands}
+
+    commentary_task = asyncio.create_task(commentary_agent.run(
         reads=reads, brands=brands, search_results=search_results, mode=mode,
-    )
-    directions = await recommendation_agent.run(
-        observation=commentary["observation"],
-        commentary=commentary["commentary"],
-        keywords=commentary["keywords"],
-    )
+    ))
+
+    commentary, directions = await asyncio.gather(commentary_task, rec_task)
 
     # Attach a generated product image per direction. Pollinations URLs
     # are lazy (client fetches on demand) so this adds zero latency to
-    # the brief. fal.ai backend would add ~2-4s/image.
+    # the brief.
     try:
         directions = await image_gen.generate_for_directions(
             directions,

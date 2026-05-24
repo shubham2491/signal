@@ -54,15 +54,48 @@ SCHEMA = """
 """.strip()
 
 
-async def run(*, observation: str, commentary: str, keywords: list[str]) -> list[Direction]:
+async def run(
+    *,
+    observation: str = "",
+    commentary: str = "",
+    keywords: list[str] | None = None,
+    facets: dict[str, list[str]] | None = None,
+) -> list[Direction]:
+    """Produce 3 directions. Accepts either commentary context (when
+    available) or pooled vision facets (when run in parallel with the
+    commentary sub-agents). With facets, the agent constructs an
+    observation hint from category + aesthetic + silhouette so it can
+    run independently of the editorial agent — that unlocks running
+    recommendation in parallel with commentary, which roughly halves
+    end-to-end latency."""
     llm = get_llm()
+    keywords = keywords or []
+    facets = facets or {}
+
+    # If we weren't handed an observation, build one from pooled vision facets.
+    if not observation and facets:
+        bits = (facets.get("aesthetics") or [])[:1] + (facets.get("silhouettes") or [])[:1] + (facets.get("categories") or [])[:1]
+        observation = " ".join(b for b in bits if b).strip()[:80]
+    observation = observation or "Editorial Read"
+
     if not llm.is_available:
         return _mock(observation, keywords)
 
+    facet_lines = ""
+    if facets:
+        facet_lines = (
+            f"\nVision facets (the actual read of the image):\n"
+            f"  aesthetics:  {', '.join(facets.get('aesthetics', [])) or '—'}\n"
+            f"  categories:  {', '.join(facets.get('categories', [])) or '—'}\n"
+            f"  colors:      {', '.join(facets.get('colors', [])) or '—'}\n"
+            f"  silhouettes: {', '.join(facets.get('silhouettes', [])) or '—'}\n"
+            f"  market:      {', '.join(facets.get('segments', [])) or '—'}"
+        )
+
     user_text = f"""
 Observation: {observation}
-Commentary:  {commentary}
-Keywords:    {", ".join(keywords) or "—"}
+Commentary:  {commentary or "—"}
+Keywords:    {", ".join(keywords) or "—"}{facet_lines}
 
 Write three directions. Each MUST include price_band_inr, complexity,
 and timing — they're the difference between a brief and a wish list.
@@ -73,7 +106,7 @@ and timing — they're the difference between a brief and a wish list.
             system=SYSTEM, user_text=user_text, schema_hint=SCHEMA, temperature=0.6,
         )
     except Exception as e:
-        log.warning("Recommendation LLM call failed, using mock: %s", e)
+        log.warning("Recommendation LLM call failed (%s: %s), using mock", type(e).__name__, e)
         return _mock(observation, keywords)
 
     out: list[Direction] = []

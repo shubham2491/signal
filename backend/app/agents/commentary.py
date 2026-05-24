@@ -176,7 +176,7 @@ async def run(
     succeeded), 'partial' (some succeeded, some fell back), or
     'fallback' (Gemini not configured at all)."""
     llm = get_llm()
-    pooled = _pool(reads)
+    pooled = pool_reads(reads)
     brand_block = _brand_block(brands, search_results)
 
     if not llm.is_available:
@@ -457,7 +457,7 @@ Write the price ladder + production + merchandising sections.
     }
 
 
-def _pool(reads: list[ImageRead]) -> dict[str, list[str]]:
+def pool_reads(reads: list[ImageRead]) -> dict[str, list[str]]:
     aesthetics, categories, colors, silhouettes, segments, keywords = [], [], [], [], [], []
     for r in reads:
         a = r.attributes

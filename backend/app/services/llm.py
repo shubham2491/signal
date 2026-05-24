@@ -21,9 +21,9 @@ from app.config import get_settings
 log = logging.getLogger(__name__)
 
 # Hard per-call ceiling. Tuned for Gemini Flash p95 (~6-10s) with headroom.
-LLM_CALL_TIMEOUT_S = 25.0
-LLM_TEXT_TIMEOUT_S = 45.0  # text_json calls — keep tight so retry kicks in fast
-LLM_RETRY_ATTEMPTS = 2     # initial + 1 retry; second attempt bumps temperature
+LLM_CALL_TIMEOUT_S = 35.0   # vision (per image)
+LLM_TEXT_TIMEOUT_S = 55.0   # text_json — single call with no retry
+LLM_RETRY_ATTEMPTS = 1      # ONE attempt; failures route to focused fallback fast
 
 
 class _Backend(Protocol):
