@@ -292,22 +292,31 @@ _EDITORIAL_SCHEMA = """
 _TRANSLATION_SYSTEM = """You are SIGNAL's Translation Agent. The reader
 is an Indian fast-fashion designer translating an international
 aspirational look into an India launch. Produce three short
-India-context sections:
+India-context sections.
+
+MANDATORY SPECIFICITY: Every section must reference at least one
+CONCRETE vision token from the provided facets — the actual category,
+the actual color, or the actual silhouette. Generic prose ("urban
+millennial woman, 24-34") is REJECTED if it doesn't anchor to the
+specific image. Do not produce text that could equally describe any
+other apparel image.
 
   consumer  — 2-3 sentences naming WHO buys this (age band, city tier,
-              household income proxy, media diet) and WHEN they wear it
-              (occasion). NO retailer names.
-  why_now   — 1-2 sentences on why this signal lands in India in this
-              specific window. Tie to monsoon / festive / wedding /
-              post-EOSS / back-to-office cycles. NO retailer names.
-  india_play — 2-3 sentences on HOW to launch. Distribution (tier-1
-              metros vs pan-India vs digital-first), drop timing (week
-              of year or season), format (capsule / hero SKU / 3-color
-              stack / limited drop). Use generic descriptors like
-              "metro stores", "value floor", "aspirational-mass shelf"
-              — NEVER name an Indian retailer.
-
-Be specific. Use Indian retail vocabulary.
+              household income proxy, media diet) and WHEN they wear
+              this SPECIFIC item (occasion tied to the actual category +
+              color story). Reference the category and at least one
+              color by name. NO retailer names.
+  why_now   — 1-2 sentences on why this specific look (mention the
+              category and silhouette) lands in India in this window.
+              Tie to monsoon / festive / wedding / post-EOSS /
+              back-to-office cycles. NO retailer names.
+  india_play — 2-3 sentences on HOW to launch THIS specific item.
+              Distribution (tier-1 metros vs pan-India vs digital-first),
+              drop timing (week of year or season), format (capsule /
+              hero SKU / N-color stack / limited drop). Mention the
+              specific lead color in the stack. NO retailer names
+              ("metro stores", "value floor", "aspirational-mass shelf"
+              are fine).
 """.strip()
 
 _TRANSLATION_SCHEMA = """
@@ -649,23 +658,32 @@ def _mock_commentary(brands: list[Brand], pooled: dict[str, list[str]]) -> dict[
         f"credibility of {anchor_name}'s current floor without the maison-tier price burden."
     )
 
+    # Color-derived nuance so prose varies even within the same flavor bucket.
+    color_temp = _color_temperature(colors)  # 'warm' | 'cool' | 'neutral' | 'dark' | 'bright'
+    occasion_lens = _occasion_lens(color_temp, lead_silhouette)
+    style_verb = _style_verb(color_temp)
+
     consumer = (
-        f"{profile.consumer_geo}, {profile.consumer_age}, "
-        f"{profile.consumer_income}. Media diet: {profile.consumer_media}. "
-        f"This {lead_category} works for {profile.occasion} — "
-        f"{profile.wardrobe_role}."
+        f"{profile.consumer_geo}, {profile.consumer_age} — {profile.consumer_income}. "
+        f"Media diet: {profile.consumer_media}. "
+        f"The {color_phrase} palette and {lead_silhouette} cut on this {lead_category} "
+        f"{style_verb} {occasion_lens}. "
+        f"Sits at {profile.occasion} on the wear-rotation — {profile.wardrobe_role}."
     )
 
     why_now = (
-        f"{profile.season_window} is the natural drop window for a {lead_aesthetic} "
-        f"{lead_category}. {profile.cultural_moment}"
+        f"{profile.season_window} is the natural drop window for a {color_phrase} "
+        f"{lead_aesthetic} {lead_category}. {profile.cultural_moment} "
+        f"The {color_temp} register specifically lands well in this cycle."
     )
 
     india_play = (
         f"Drop tier-1 metros first (Mumbai, Delhi-NCR, Bangalore, Hyderabad) in week 1 with "
-        f"a {profile.color_stack}-color stack on the {lead_color} lead SKU. Hold tier-2/3 carry-over for "
-        f"week {profile.tier2_week} once sell-through on the {lead_silhouette} silhouette validates. "
-        f"Format as a {profile.capsule_size}-SKU capsule so the floor reads as a story, not a one-off."
+        f"a {profile.color_stack}-color stack led by {palette_lead}, supported by {palette_secondary}. "
+        f"Hold tier-2/3 carry-over for week {profile.tier2_week} once sell-through on the "
+        f"{lead_silhouette} {lead_category} validates. "
+        f"Format as a {profile.capsule_size}-SKU capsule with the {color_temp}-register "
+        f"hero piece anchoring the floor story."
     )
 
     price_strategy = (
@@ -715,6 +733,77 @@ def _format_colors(colors: list[str]) -> str:
     if len(cs) == 2:
         return f"{cs[0]} and {cs[1]}"
     return f"{cs[0]}, {cs[1]} and {cs[2]}"
+
+
+# Color-temperature buckets — used so prose varies even within the same
+# flavor profile. Membership is fuzzy (substring match) so trade names like
+# 'burnt sienna' or 'kerala green' still bucket correctly.
+_WARM_TOKENS  = {"rust","terracotta","sienna","brick","clay","camel","tobacco",
+                 "umber","ochre","mustard","gold","peach","coral","salmon",
+                 "blush","wine","burgundy","red","tomato","saffron","maroon",
+                 "ginger","copper","amber","tan","khaki"}
+_COOL_TOKENS  = {"indigo","navy","denim","sky","cobalt","rinse","midnight",
+                 "blue","teal","aqua","mint","sage","forest","olive","moss",
+                 "fern","kerala","emerald","lavender","plum","aubergine"}
+_NEUTRAL_TOKENS = {"ecru","cream","off-white","ivory","sand","stone","taupe",
+                   "mushroom","beige","oatmeal","linen","bone","greige","dove"}
+_DARK_TOKENS  = {"charcoal","jet","black","graphite","midnight","aubergine",
+                 "wine","forest","tobacco"}
+_BRIGHT_TOKENS = {"white","gold","silver","peach","coral","salmon","mustard",
+                  "sky","mint","blush","ivory"}
+
+
+def _color_temperature(colors: list[str]) -> str:
+    """Bucket the palette into one of: warm / cool / neutral / dark / bright.
+    Used so two uploads in the same flavor still produce different prose."""
+    if not colors:
+        return "neutral"
+    joined = " ".join(c.lower() for c in colors[:4])
+    warm = sum(1 for t in _WARM_TOKENS if t in joined)
+    cool = sum(1 for t in _COOL_TOKENS if t in joined)
+    neutral = sum(1 for t in _NEUTRAL_TOKENS if t in joined)
+    dark = sum(1 for t in _DARK_TOKENS if t in joined)
+    bright = sum(1 for t in _BRIGHT_TOKENS if t in joined)
+    best = max(
+        ("warm", warm), ("cool", cool), ("neutral", neutral),
+        ("dark", dark), ("bright", bright),
+        key=lambda x: x[1],
+    )
+    return best[0] if best[1] > 0 else "neutral"
+
+
+_OCCASION_LENS = {
+    "warm":    "the photographable hero of the outfit",
+    "cool":    "the office-to-evening anchor",
+    "neutral": "the spine SKU of the rotation",
+    "dark":    "the evening / going-out half of the wardrobe",
+    "bright":  "the seasonal-fresh moment on the shelf",
+}
+
+
+def _occasion_lens(temp: str, silhouette: str) -> str:
+    base = _OCCASION_LENS.get(temp, _OCCASION_LENS["neutral"])
+    s = (silhouette or "").lower()
+    if "boxy" in s or "oversized" in s:
+        return base + ", the volume signalling effort-without-effort"
+    if "fitted" in s or "structured" in s or "tailored" in s:
+        return base + ", the clean line doing the elevating"
+    if "wide" in s or "loose" in s or "relaxed" in s:
+        return base + ", the relaxed cut opening the wear-occasion range"
+    return base
+
+
+_STYLE_VERBS = {
+    "warm":    "reads as",
+    "cool":    "performs as",
+    "neutral": "anchors as",
+    "dark":    "carries as",
+    "bright":  "pops as",
+}
+
+
+def _style_verb(temp: str) -> str:
+    return _STYLE_VERBS.get(temp, "reads as")
 
 
 @dataclass
