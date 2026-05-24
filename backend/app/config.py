@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     llm_provider: str = "gemini"   # gemini | openai
 
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-2.5-flash"
 
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
