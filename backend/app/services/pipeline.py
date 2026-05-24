@@ -20,6 +20,7 @@ from app.agents import (
     search as search_agent,
     vision,
 )
+from app.services import image_gen
 from app.schemas import (
     AnalysisReport,
     BrandSignal,
@@ -166,6 +167,20 @@ async def _build_section(reads: list[ImageRead], mode: Mode) -> dict:
         commentary=commentary["commentary"],
         keywords=commentary["keywords"],
     )
+
+    # Attach a generated product image per direction. Pollinations URLs
+    # are lazy (client fetches on demand) so this adds zero latency to
+    # the brief. fal.ai backend would add ~2-4s/image.
+    try:
+        directions = await image_gen.generate_for_directions(
+            directions,
+            palette=commentary.get("palette", []),
+            observation=commentary["observation"],
+        )
+    except Exception as e:
+        log.warning("image generation failed (%s: %s) — proceeding without product images",
+                    type(e).__name__, e)
+
     return {
         "observation": commentary["observation"],
         "summary": commentary["summary"],

@@ -37,6 +37,8 @@ export type Direction = {
   price_band_inr?: string;
   complexity?: 'easy' | 'medium' | 'hard' | '';
   timing?: string;
+  image_url?: string;
+  image_prompt?: string;
 };
 
 export type ShotType =
@@ -159,6 +161,32 @@ export async function emailReport(
   });
   if (!resp.ok) throw new Error(`email failed (${resp.status})`);
   return resp.json();
+}
+
+export async function refineDirection(args: {
+  direction: Direction;
+  refinement: string;
+  observation?: string;
+  commentary?: string;
+  palette?: string[];
+}): Promise<Direction> {
+  const resp = await fetch(`${API_BASE}/iterate-direction`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      direction: args.direction,
+      refinement: args.refinement,
+      observation: args.observation ?? '',
+      commentary: args.commentary ?? '',
+      palette: args.palette ?? [],
+    }),
+  });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`refine failed (${resp.status}): ${body || resp.statusText}`);
+  }
+  const data = await resp.json();
+  return data.direction as Direction;
 }
 
 export async function analyzeBrief(brief: string): Promise<AnalysisReport> {

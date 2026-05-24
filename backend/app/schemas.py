@@ -73,6 +73,8 @@ class Direction(BaseModel):
     price_band_inr: str = ""
     complexity: Literal["easy", "medium", "hard", ""] = ""
     timing: str = ""
+    image_url: str = ""
+    image_prompt: str = ""  # what we asked the image model for (debug + iterate)
 
 
 class GroupReport(BaseModel):
@@ -125,6 +127,21 @@ class AnalysisReport(BaseModel):
 
 class TextBriefRequest(BaseModel):
     brief: str = Field(..., min_length=4, max_length=2000)
+
+
+class RefineDirectionRequest(BaseModel):
+    """Designer hands us a direction + a natural-language refinement; we
+    return an updated direction (new title/description/price/image)."""
+    direction: Direction
+    refinement: str = Field(..., min_length=2, max_length=400)
+    # Context from the parent report so the refinement stays grounded.
+    observation: str = ""
+    commentary: str = ""
+    palette: list[str] = []
+
+
+class RefineDirectionResponse(BaseModel):
+    direction: Direction
 
 
 class ExportRequest(BaseModel):

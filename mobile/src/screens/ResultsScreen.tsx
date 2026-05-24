@@ -1,16 +1,21 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, CommonActions } from '@react-navigation/native';
+import * as Haptics from 'expo-haptics';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { Button } from '@/components/Button';
@@ -19,17 +24,75 @@ import { Kicker } from '@/components/Kicker';
 import { SimilarityPill } from '@/components/SimilarityPill';
 import { colors, radii, spacing, type } from '@/theme';
 import type { RootStackParamList } from '@/navigation';
+import { refineDirection, type Direction } from '@/api/client';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Results'>;
 type Nav = NativeStackNavigationProp<RootStackParamList, 'Results'>;
 
 const HERO_HEIGHT = 360;
 
+const REFINE_SUGGESTIONS = [
+  'but in linen',
+  'push the proportion more',
+  'shift to festive',
+  'drop the price by 30%',
+  'add an embroidered placement',
+];
+
 export function ResultsScreen() {
   const route = useRoute<Props['route']>();
   const nav = useNavigation<Nav>();
   const { report, thumbnails } = route.params;
   const [showDetail, setShowDetail] = useState(false);
+
+  // Local state for directions so we can replace one after refine.
+  const [directions, setDirections] = useState<Direction[]>(report.directions);
+
+  // Refine modal state
+  const [refineFor, setRefineFor] = useState<Direction | null>(null);
+  const [refineText, setRefineText] = useState('');
+  const [refineBusy, setRefineBusy] = useState(false);
+  const [refineError, setRefineError] = useState<string | null>(null);
+
+  const openRefine = (d: Direction) => {
+    setRefineFor(d);
+    setRefineText('');
+    setRefineError(null);
+  };
+  const closeRefine = () => {
+    if (refineBusy) return;
+    setRefineFor(null);
+    setRefineText('');
+    setRefineError(null);
+  };
+  const submitRefine = async () => {
+    if (!refineFor) return;
+    const text = refineText.trim();
+    if (text.length < 2) {
+      setRefineError('Add a bit more detail.');
+      return;
+    }
+    setRefineBusy(true);
+    setRefineError(null);
+    try {
+      const updated = await refineDirection({
+        direction: refineFor,
+        refinement: text,
+        observation: report.observation,
+        commentary: report.commentary,
+        palette: report.palette,
+      });
+      setDirections((prev) => prev.map((d) => (d.label === updated.label ? updated : d)));
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      setRefineFor(null);
+      setRefineText('');
+    } catch (e: any) {
+      setRefineError(e?.message ?? 'Refinement failed.');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+    } finally {
+      setRefineBusy(false);
+    }
+  };
 
   const modeLabel = report.mode.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   const hasHeroImage = thumbnails.length > 0;
@@ -285,7 +348,7 @@ export function ResultsScreen() {
             <View style={styles.accentBar} />
             <Text style={styles.sectionLabel}>Three Routes Forward</Text>
           </View>
-          {report.directions.map((d) => {
+          {directions.map((d) => {
             const meta = DIRECTION_META[d.label] || DIRECTION_META.fallback;
             const metaBits = [
               d.price_band_inr,
@@ -294,21 +357,39 @@ export function ResultsScreen() {
             ].filter(Boolean) as string[];
             return (
               <View key={d.label} style={[styles.dirCard, { backgroundColor: meta.tint }]}>
-                <View style={styles.dirCardHead}>
-                  <Text style={styles.dirCardGlyph}>{meta.glyph}</Text>
-                  <Text style={[styles.dirCardLabel, { color: meta.color }]}>{d.label.toUpperCase()}</Text>
-                </View>
-                <Text style={styles.dirCardTitle}>{d.title}</Text>
-                <Text style={styles.dirCardDesc}>{d.description}</Text>
-                {metaBits.length ? (
-                  <View style={styles.dirMetaRow}>
-                    {metaBits.map((m, idx) => (
-                      <View key={idx} style={styles.dirMetaPill}>
-                        <Text style={styles.dirMetaText}>{m}</Text>
-                      </View>
-                    ))}
+                {d.image_url ? (
+                  <View style={styles.dirImageWrap}>
+                    <Image
+                      source={{ uri: d.image_url }}
+                      style={styles.dirImage}
+                      resizeMode="cover"
+                    />
                   </View>
                 ) : null}
+                <View style={styles.dirBody}>
+                  <View style={styles.dirCardHead}>
+                    <Text style={styles.dirCardGlyph}>{meta.glyph}</Text>
+                    <Text style={[styles.dirCardLabel, { color: meta.color }]}>{d.label.toUpperCase()}</Text>
+                  </View>
+                  <Text style={styles.dirCardTitle}>{d.title}</Text>
+                  <Text style={styles.dirCardDesc}>{d.description}</Text>
+                  {metaBits.length ? (
+                    <View style={styles.dirMetaRow}>
+                      {metaBits.map((m, idx) => (
+                        <View key={idx} style={styles.dirMetaPill}>
+                          <Text style={styles.dirMetaText}>{m}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                  <Pressable
+                    onPress={() => openRefine(d)}
+                    style={({ pressed }) => [styles.refineBtn, pressed && { opacity: 0.7 }]}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.refineBtnText}>✎  Refine this direction</Text>
+                  </Pressable>
+                </View>
               </View>
             );
           })}
@@ -424,6 +505,78 @@ export function ResultsScreen() {
           <Button label="Export Brief" onPress={() => nav.navigate('Export', { report })} style={{ flex: 1 }} />
         </View>
       </ScrollView>
+
+      {/* ─── REFINE MODAL ──────────────────────────────────────── */}
+      <Modal
+        visible={refineFor !== null}
+        animationType="slide"
+        transparent
+        onRequestClose={closeRefine}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={closeRefine}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalKeyboardWrap}
+          >
+            <Pressable onPress={(e) => e.stopPropagation()} style={styles.modalSheet}>
+              <View style={styles.modalHandle} />
+              <Text style={styles.modalKicker}>REFINE</Text>
+              <Text style={styles.modalTitle}>{refineFor?.title}</Text>
+              <Text style={styles.modalSubtle}>
+                Describe the change in plain English. We'll rewrite the brief and regenerate the image.
+              </Text>
+
+              <TextInput
+                value={refineText}
+                onChangeText={(t) => { setRefineText(t); if (refineError) setRefineError(null); }}
+                placeholder="e.g. but in linen, drop the print"
+                placeholderTextColor={colors.textSubtle}
+                style={styles.modalInput}
+                multiline
+                numberOfLines={3}
+                editable={!refineBusy}
+                autoFocus
+              />
+
+              {refineError ? <Text style={styles.modalError}>{refineError}</Text> : null}
+
+              <View style={styles.modalChipRow}>
+                {REFINE_SUGGESTIONS.map((s) => (
+                  <Pressable
+                    key={s}
+                    onPress={() => !refineBusy && setRefineText(s)}
+                    style={({ pressed }) => [styles.modalChip, pressed && { opacity: 0.7 }]}
+                  >
+                    <Text style={styles.modalChipText}>{s}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <View style={styles.modalActions}>
+                <Pressable onPress={closeRefine} style={styles.modalCancel} hitSlop={8}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </Pressable>
+                <Button
+                  label={refineBusy ? 'Refining…' : 'Apply refinement'}
+                  onPress={submitRefine}
+                  loading={refineBusy}
+                  disabled={refineBusy}
+                  style={{ flex: 1 }}
+                />
+              </View>
+
+              {refineBusy ? (
+                <View style={styles.modalBusy}>
+                  <ActivityIndicator size="small" color={colors.emerald} />
+                  <Text style={styles.modalBusyText}>
+                    Rewriting + regenerating image…
+                  </Text>
+                </View>
+              ) : null}
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -663,7 +816,13 @@ const styles = StyleSheet.create({
   opsText: { ...type.body, color: colors.text, lineHeight: 22 },
 
   // Direction cards
-  dirCard: { borderRadius: radii.lg, padding: spacing.xl, marginBottom: spacing.md },
+  dirCard: { borderRadius: radii.lg, marginBottom: spacing.md, overflow: 'hidden' },
+  dirImageWrap: {
+    width: '100%', height: 240,
+    backgroundColor: 'rgba(255,255,255,0.5)',
+  },
+  dirImage: { width: '100%', height: 240 },
+  dirBody: { padding: spacing.xl },
   dirCardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   dirCardGlyph: { fontSize: 18 },
   dirCardLabel: { ...type.caption, letterSpacing: 1.4, fontSize: 10, fontWeight: '700' },
@@ -675,6 +834,70 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.7)',
   },
   dirMetaText: { ...type.bodySm, fontSize: 11, color: colors.text, fontWeight: '500' },
+  refineBtn: {
+    marginTop: spacing.lg,
+    alignSelf: 'flex-start',
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(0,0,0,0.1)',
+  },
+  refineBtnText: {
+    ...type.bodySm, fontSize: 12, fontWeight: '600', color: colors.text,
+  },
+
+  // Refine modal
+  modalBackdrop: {
+    flex: 1, backgroundColor: 'rgba(15,15,14,0.55)',
+    justifyContent: 'flex-end',
+  },
+  modalKeyboardWrap: { width: '100%' },
+  modalSheet: {
+    backgroundColor: colors.bg,
+    borderTopLeftRadius: radii.lg, borderTopRightRadius: radii.lg,
+    padding: spacing.xl, paddingBottom: spacing.xxl,
+    maxHeight: '85%',
+  },
+  modalHandle: {
+    width: 36, height: 4, borderRadius: 2,
+    backgroundColor: colors.divider,
+    alignSelf: 'center', marginBottom: spacing.lg,
+  },
+  modalKicker: {
+    fontSize: 10, letterSpacing: 1.8, fontWeight: '700',
+    color: colors.emerald, marginBottom: spacing.xs,
+  },
+  modalTitle: { ...type.h2, color: colors.text, marginBottom: spacing.sm },
+  modalSubtle: { ...type.bodySm, color: colors.textMuted, marginBottom: spacing.lg, lineHeight: 18 },
+  modalInput: {
+    ...type.body, minHeight: 80,
+    backgroundColor: colors.surface,
+    borderRadius: radii.md, padding: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: colors.divider,
+    color: colors.text, textAlignVertical: 'top',
+    ...(Platform.OS === 'web' ? { outlineColor: colors.emerald } as any : {}),
+  },
+  modalError: { ...type.bodySm, color: colors.burgundy, marginTop: spacing.sm },
+  modalChipRow: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: spacing.md,
+  },
+  modalChip: {
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderRadius: 999, backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: colors.divider,
+  },
+  modalChipText: { ...type.bodySm, fontSize: 12, color: colors.text },
+  modalActions: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    marginTop: spacing.xl,
+  },
+  modalCancel: { paddingHorizontal: spacing.md, paddingVertical: spacing.md },
+  modalCancelText: { ...type.body, color: colors.textMuted, fontWeight: '600' },
+  modalBusy: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: spacing.sm, marginTop: spacing.md,
+  },
+  modalBusyText: { ...type.bodySm, color: colors.textMuted },
 
   // Detail drawer
   detailToggle: { alignSelf: 'center', paddingVertical: spacing.xl },

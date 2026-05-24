@@ -23,6 +23,8 @@ from app.schemas import (
     EmailResponse,
     ExportRequest,
     ExportResponse,
+    RefineDirectionRequest,
+    RefineDirectionResponse,
     TextBriefRequest,
 )
 from app.services import pdf as pdf_service
@@ -107,6 +109,39 @@ async def analyze_text(req: TextBriefRequest) -> AnalysisReport:
     except Exception as e:
         log.exception("text brief pipeline failure")
         raise HTTPException(500, f"analysis failed: {e}") from e
+
+
+@app.post("/iterate-direction", response_model=RefineDirectionResponse)
+async def iterate_direction(req: RefineDirectionRequest) -> RefineDirectionResponse:
+    """Apply a natural-language refinement to a single direction.
+
+    Designer hands us the existing direction + their refinement
+    ('but in linen, drop the print'); we return an updated direction
+    with a freshly generated product image.
+    """
+    from app.agents import recommendation as recommendation_agent
+    from app.services import image_gen
+
+    try:
+        updated = await recommendation_agent.refine(
+            direction=req.direction,
+            refinement=req.refinement,
+            observation=req.observation,
+            commentary=req.commentary,
+            palette=req.palette,
+        )
+        # Regenerate the image so it matches the refined description.
+        try:
+            prompt = image_gen.build_prompt(updated, palette=req.palette, observation=req.observation)
+            url = await image_gen.generate_image(prompt, seed=hash(req.refinement) % 100_000)
+            updated.image_url = url
+            updated.image_prompt = prompt
+        except Exception as e:
+            log.warning("refine: image regeneration failed (%s)", e)
+        return RefineDirectionResponse(direction=updated)
+    except Exception as e:
+        log.exception("refine endpoint failure")
+        raise HTTPException(500, f"refine failed: {e}") from e
 
 
 @app.post("/export-report", response_model=ExportResponse)

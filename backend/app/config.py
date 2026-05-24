@@ -16,6 +16,11 @@ class Settings(BaseSettings):
 
     tavily_api_key: str = ""
 
+    # Image generation: defaults to Pollinations (free, no auth). If FAL_KEY is
+    # set, we'll use fal.ai Flux Schnell instead (faster + sharper).
+    fal_api_key: str = ""
+    image_gen_enabled: bool = True
+
     public_base_url: str = "http://localhost:8000"
     report_ttl_hours: int = 24
 

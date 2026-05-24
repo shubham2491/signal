@@ -140,3 +140,102 @@ def _mock(observation: str, keywords: list[str]) -> list[Direction]:
 
 def _fallback_desc(label: str, observation: str) -> str:
     return f"Direction informed by '{observation}'."
+
+
+# ─── Refine a single direction in natural language ─────────────────────
+
+REFINE_SYSTEM = """You are SIGNAL's Refinement Agent. The designer is
+iterating on ONE design direction with a free-text refinement
+('but in linen, drop the print', 'push the proportion more',
+'make it for festive, not casual'). Produce the UPDATED direction.
+
+Keep the same label. Keep the Indian-retail framing: INR price band,
+production complexity tag, season/timing. Stay specific — fabric gsm,
+trim callouts, color story.
+
+Honour the refinement strictly. If they ask for linen, the fabric spec
+changes. If they ask to push price, the band goes up. If they ask for
+festive, the timing window shifts to the festive cycle.
+""".strip()
+
+REFINE_SCHEMA = """
+{
+  "title": "string (3-6 words)",
+  "description": "string (2-3 sentences, fabric / palette / trim specific)",
+  "price_band_inr": "string (e.g. 'INR 999-1,299')",
+  "complexity": "easy | medium | hard",
+  "timing": "string (season + drop window)"
+}
+""".strip()
+
+
+async def refine(
+    *,
+    direction: Direction,
+    refinement: str,
+    observation: str = "",
+    commentary: str = "",
+    palette: list[str] | None = None,
+) -> Direction:
+    """Apply a natural-language refinement to a direction. Returns a new
+    Direction (caller is responsible for regenerating the image)."""
+    llm = get_llm()
+    palette = palette or []
+
+    if not llm.is_available:
+        return _refine_mock(direction, refinement, palette)
+
+    user_text = f"""
+Parent context (do not contradict):
+  Observation: {observation}
+  Commentary:  {commentary[:600]}
+  Palette:     {", ".join(palette[:6]) or "—"}
+
+Existing direction to refine:
+  Label:       {direction.label}
+  Title:       {direction.title}
+  Description: {direction.description}
+  Price band:  {direction.price_band_inr or "—"}
+  Complexity:  {direction.complexity or "—"}
+  Timing:      {direction.timing or "—"}
+
+Designer's refinement: "{refinement}"
+
+Apply the refinement. Return the updated direction.
+""".strip()
+
+    try:
+        data: dict[str, Any] = await llm.text_json(
+            system=REFINE_SYSTEM, user_text=user_text, schema_hint=REFINE_SCHEMA, temperature=0.5,
+        )
+    except Exception as e:
+        log.warning("Refinement LLM call failed (%s: %s), using mock", type(e).__name__, e)
+        return _refine_mock(direction, refinement, palette)
+
+    complexity = str(data.get("complexity", direction.complexity or "")).strip().lower()
+    if complexity not in ("easy", "medium", "hard"):
+        complexity = direction.complexity or ""
+
+    return Direction(
+        label=direction.label,
+        title=str(data.get("title", direction.title))[:80],
+        description=str(data.get("description", direction.description))[:600],
+        price_band_inr=str(data.get("price_band_inr", direction.price_band_inr))[:60],
+        complexity=complexity,  # type: ignore[arg-type]
+        timing=str(data.get("timing", direction.timing))[:120],
+    )
+
+
+def _refine_mock(direction: Direction, refinement: str, palette: list[str]) -> Direction:
+    """No LLM available — return the direction with the refinement
+    appended as a one-liner so the designer at least sees their intent
+    captured."""
+    suffix = f" — {refinement.strip()}." if refinement else ""
+    return Direction(
+        label=direction.label,
+        title=direction.title,
+        description=(direction.description.rstrip(". ") + suffix)[:600],
+        price_band_inr=direction.price_band_inr,
+        complexity=direction.complexity,
+        timing=direction.timing,
+    )
