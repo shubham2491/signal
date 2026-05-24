@@ -34,6 +34,15 @@ CategoryGroup = Literal[
 ]
 
 
+GenderTarget = Literal[
+    "womenswear",
+    "menswear",
+    "unisex",
+    "kidswear",
+    "unknown",
+]
+
+
 class VisionAttributes(BaseModel):
     """Per-image attribute extraction from the Vision Agent."""
 
@@ -49,6 +58,8 @@ class VisionAttributes(BaseModel):
     # Phase 2: grouping signals
     shot_type: ShotType = "unknown"
     category_group: CategoryGroup = "unknown"
+    # Phase 6: who is the garment FOR (read from styling cues, not the model)
+    gender_target: GenderTarget = "unknown"
 
 
 class ImageRead(BaseModel):

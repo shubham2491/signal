@@ -33,7 +33,7 @@ Allen Solly, Snitch, AND, Biba, etc.). Be concrete and design-literate.
 Identity-blind: never describe faces, body type, race, gender expression,
 or any personal identifier. Only the garments and their construction.
 
-For each image extract DESIGN-USEFUL specifics PLUS two GROUPING signals
+For each image extract DESIGN-USEFUL specifics PLUS three GROUPING signals
 the pipeline uses to cluster multi-image uploads:
 
   - shot_type:      what KIND of shot this is, one of
@@ -53,6 +53,19 @@ the pipeline uses to cluster multi-image uploads:
                     "accessory" (bag/jewellery/scarf),
                     "co_ord" (matching top+bottom set),
                     "unknown".
+  - gender_target: who is the GARMENT designed for, one of
+                    "womenswear", "menswear", "unisex", "kidswear",
+                    "unknown".
+                    Read this from GARMENT cues, never the person wearing it:
+                    button-side (men's button on right, women's on left),
+                    silhouette conventions (e.g. dropped-shoulder
+                    short-sleeve denim shirt = menswear; fit-and-flare
+                    midi = womenswear), trim placement, pocket shape,
+                    fly direction, common menswear vs womenswear
+                    construction. If a garment is genuinely unisex
+                    (e.g. boxy graphic tee, hoodie, joggers without
+                    clear gendering), say "unisex". Only return
+                    "unknown" if you truly cannot infer.
 
 And the design-specific extraction:
   - category:     the actual garment (e.g. "drop-shoulder graphic tee",
@@ -101,7 +114,8 @@ SCHEMA = """
         "market_segment": "string",
         "notes": "string",
         "shot_type": "flatlay | store_walk | lookbook | runway | model_shot | unknown",
-        "category_group": "top | bottom | outerwear | dress | ethnic | footwear | accessory | co_ord | unknown"
+        "category_group": "top | bottom | outerwear | dress | ethnic | footwear | accessory | co_ord | unknown",
+        "gender_target": "womenswear | menswear | unisex | kidswear | unknown"
       },
       "keywords": ["string"]
     }
@@ -155,6 +169,7 @@ async def run(images: list[bytes]) -> list[ImageRead]:
 
 _VALID_SHOT = {"flatlay", "store_walk", "lookbook", "runway", "model_shot", "unknown"}
 _VALID_GROUP = {"top", "bottom", "outerwear", "dress", "ethnic", "footwear", "accessory", "co_ord", "unknown"}
+_VALID_GENDER = {"womenswear", "menswear", "unisex", "kidswear", "unknown"}
 
 
 def _coerce_attrs(d: dict[str, Any]) -> dict[str, Any]:
@@ -164,6 +179,20 @@ def _coerce_attrs(d: dict[str, Any]) -> dict[str, Any]:
     group = str(d.get("category_group", "")).strip().lower().replace("-", "_").replace(" ", "_")
     if group not in _VALID_GROUP:
         group = _guess_group_from_category(str(d.get("category", "")))
+    raw_gender = str(d.get("gender_target", "")).strip().lower().replace("-", "").replace(" ", "")
+    # Accept common variants: 'mens', 'men', 'male', 'mens-wear', 'men's wear' etc.
+    if raw_gender in {"mens", "men", "male", "menswear", "boys"}:
+        gender = "menswear"
+    elif raw_gender in {"womens", "women", "female", "womenswear", "girls", "ladies"}:
+        gender = "womenswear"
+    elif raw_gender in {"unisex", "gender-neutral", "neutral", "androgynous"}:
+        gender = "unisex"
+    elif raw_gender in {"kids", "kidswear", "children", "child"}:
+        gender = "kidswear"
+    elif raw_gender in _VALID_GENDER:
+        gender = raw_gender
+    else:
+        gender = "unknown"
     return {
         "category": str(d.get("category", "")),
         "silhouette": str(d.get("silhouette", "")),
@@ -176,6 +205,7 @@ def _coerce_attrs(d: dict[str, Any]) -> dict[str, Any]:
         "notes": str(d.get("notes", "")),
         "shot_type": shot,
         "category_group": group,
+        "gender_target": gender,
     }
 
 

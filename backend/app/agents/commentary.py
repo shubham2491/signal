@@ -316,6 +316,15 @@ millennial woman, 24-34") is REJECTED if it doesn't anchor to the
 specific image. Do not produce text that could equally describe any
 other apparel image.
 
+MANDATORY GENDER MATCH: Read the GARMENT GENDER field from the facets.
+If it says 'menswear', the consumer profile MUST be a male reader
+("urban Indian man / professional / Gen-Z guy"). If 'womenswear', the
+consumer is female. If 'unisex', use gender-neutral language
+("the urban Indian Gen-Z shopper"). If 'kidswear', the buyer is a
+parent / guardian and the wearer is a child. NEVER default to
+womenswear when the garment is menswear or unisex. This is the single
+most common error mode for this agent — get it right.
+
   consumer  — 2-3 sentences naming WHO buys this (age band, city tier,
               household income proxy, media diet) and WHEN they wear
               this SPECIFIC item (occasion tied to the actual category +
@@ -372,8 +381,11 @@ _OPS_SCHEMA = """
 """.strip()
 
 
-def _facets_block(pooled: dict[str, list[str]]) -> str:
+def _facets_block(pooled: dict[str, Any]) -> str:
+    gender = pooled.get("gender") or "unknown"
     return (
+        f"  GARMENT GENDER: {gender}  (this is the audience for the brief — "
+        f"do NOT default to womenswear if the garment reads menswear/unisex/kidswear)\n"
         f"  aesthetics:  {', '.join(pooled['aesthetics']) or '—'}\n"
         f"  categories:  {', '.join(pooled['categories']) or '—'}\n"
         f"  colors:      {', '.join(pooled['colors']) or '—'}\n"
@@ -481,8 +493,9 @@ Write the price ladder + production + merchandising sections.
     }
 
 
-def pool_reads(reads: list[ImageRead]) -> dict[str, list[str]]:
+def pool_reads(reads: list[ImageRead]) -> dict[str, Any]:
     aesthetics, categories, colors, silhouettes, segments, keywords = [], [], [], [], [], []
+    genders: list[str] = []
     for r in reads:
         a = r.attributes
         if a.aesthetic:
@@ -495,6 +508,13 @@ def pool_reads(reads: list[ImageRead]) -> dict[str, list[str]]:
         if a.market_segment:
             segments.append(a.market_segment)
         keywords.extend(r.keywords)
+        if a.gender_target and a.gender_target != "unknown":
+            genders.append(a.gender_target)
+    # Pick the dominant gender across the upload. Falls back to "unknown".
+    dominant_gender = "unknown"
+    if genders:
+        from collections import Counter
+        dominant_gender = Counter(genders).most_common(1)[0][0]
     return {
         "aesthetics": _uniq(aesthetics),
         "categories": _uniq(categories),
@@ -502,6 +522,7 @@ def pool_reads(reads: list[ImageRead]) -> dict[str, list[str]]:
         "silhouettes": _uniq(silhouettes),
         "segments": _uniq(segments),
         "keywords": _uniq(keywords),
+        "gender": dominant_gender,
     }
 
 
