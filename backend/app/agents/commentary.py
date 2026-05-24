@@ -624,55 +624,97 @@ def _mock_commentary(brands: list[Brand], pooled: dict[str, list[str]]) -> dict[
     # Price ladder math: derive from market segment + flavor profile.
     anchor_name, anchor_price, floor_band, target_band = _price_ladder(brands, lead_segment, profile)
 
+    # Vision-anchored color phrasing: weave the ACTUAL colors into prose so
+    # two uploads with different palettes don't produce identical text.
+    color_phrase = _format_colors(colors)
+    palette_lead = colors[0] if colors else "neutral"
+    palette_secondary = colors[1] if len(colors) > 1 else palette_lead
+
+    # Anchor brand and price ladder
+    anchor_name, anchor_price, floor_band, target_band = _price_ladder(brands, lead_segment, profile)
+
+    # Compose each section by combining vision specifics with flavor logic.
+    # Every section references at least one concrete vision token (category,
+    # color, silhouette) so different uploads always read differently.
+    summary = (
+        f"A {lead_aesthetic} {lead_category} in {color_phrase} — translating a "
+        f"global {profile.tier} read into the Indian {lead_segment} floor."
+    )[:220]
+
+    commentary = (
+        f"The {lead_category} reads {lead_aesthetic}: {lead_silhouette} proportions, "
+        f"{palette_lead} carrying the palette. The {profile.tier} narrative is "
+        f"{profile.momentum} globally — {profile.cultural_fit}, and at the Indian "
+        f"{lead_segment} tier the translation is direct. Right now this aesthetic carries the "
+        f"credibility of {anchor_name}'s current floor without the maison-tier price burden."
+    )
+
+    consumer = (
+        f"{profile.consumer_geo}, {profile.consumer_age}, "
+        f"{profile.consumer_income}. Media diet: {profile.consumer_media}. "
+        f"This {lead_category} works for {profile.occasion} — "
+        f"{profile.wardrobe_role}."
+    )
+
+    why_now = (
+        f"{profile.season_window} is the natural drop window for a {lead_aesthetic} "
+        f"{lead_category}. {profile.cultural_moment}"
+    )
+
+    india_play = (
+        f"Drop tier-1 metros first (Mumbai, Delhi-NCR, Bangalore, Hyderabad) in week 1 with "
+        f"a {profile.color_stack}-color stack on the {lead_color} lead SKU. Hold tier-2/3 carry-over for "
+        f"week {profile.tier2_week} once sell-through on the {lead_silhouette} silhouette validates. "
+        f"Format as a {profile.capsule_size}-SKU capsule so the floor reads as a story, not a one-off."
+    )
+
+    price_strategy = (
+        f"Aspirational anchor: {anchor_name} {anchor_price} for a comparable "
+        f"{lead_silhouette} {lead_category}. The urban value floor lands the same look at "
+        f"{floor_band} today. Recommended MRP {target_band} — {profile.price_logic}"
+    )
+
+    production_notes = (
+        f"{profile.fabric_spec}, in {palette_lead}-led colorways with {palette_secondary} as the support; "
+        f"{profile.complexity} complexity at scale. Critical trims: {profile.trims}."
+    )
+
+    merchandising = (
+        f"Drop the {lead_category} alongside {profile.adjacent_skus} so the capsule reads complete. "
+        f"Stack {profile.color_stack} colors deep on the {lead_color} hero, 2 on supports."
+    )
+
     return {
         "observation": observation,
-        "summary": (
-            f"{lead_aesthetic.capitalize()} {lead_category} read in a "
-            f"{lead_color} palette — translating from a global {profile.tier} aesthetic "
-            f"into the Indian {lead_segment} floor."
-        )[:220],
+        "summary": summary,
         "brand_signals": sigs,
-        "commentary": (
-            f"The look reads as {lead_aesthetic} — proportions tilt toward {lead_silhouette}, "
-            f"palette anchored in {lead_color}. The {profile.tier} narrative is "
-            f"{profile.momentum} globally right now, and {profile.cultural_fit} translates "
-            f"cleanly into the Indian {lead_segment} consumer's reference set. "
-            f"This is the moment to translate it before the silhouette commoditises."
-        ),
-        "consumer": (
-            f"{profile.consumer_geo}, {profile.consumer_age}, "
-            f"{profile.consumer_income}. Media diet: {profile.consumer_media}. "
-            f"Worn for {profile.occasion} — {profile.wardrobe_role}."
-        ),
-        "why_now": (
-            f"{profile.season_window} is the natural drop window for this read. "
-            f"{profile.cultural_moment}"
-        ),
-        "india_play": (
-            f"Drop tier-1 metros first (Mumbai, Delhi-NCR, Bangalore, Hyderabad) in week 1 with "
-            f"a {profile.color_stack} color stack on the hero SKU. Hold tier-2/3 carry-over for "
-            f"week {profile.tier2_week} once sell-through validates. Format as a "
-            f"{profile.capsule_size}-SKU capsule so the floor reads as a story, not a one-off."
-        ),
-        "price_strategy": (
-            f"Aspirational anchor: {anchor_name} {anchor_price}. The urban value floor lands "
-            f"the same silhouette at {floor_band} today. Recommended MRP {target_band} — "
-            f"{profile.price_logic}"
-        ),
+        "commentary": commentary,
+        "consumer": consumer,
+        "why_now": why_now,
+        "india_play": india_play,
+        "price_strategy": price_strategy,
         "price_anchor_inr": f"{anchor_name} {anchor_price}",
         "price_floor_inr": floor_band,
         "price_target_inr": target_band,
         "palette": colors[:6],
-        "production_notes": (
-            f"{profile.fabric_spec}; {profile.complexity} complexity at scale. "
-            f"Critical trims: {profile.trims}."
-        ),
-        "merchandising": (
-            f"Drop alongside {profile.adjacent_skus} so the capsule reads complete. "
-            f"Stack {profile.color_stack} colors deep on the hero, 2 on supports."
-        ),
+        "production_notes": production_notes,
+        "merchandising": merchandising,
         "keywords": keywords[:8],
     }
+
+
+def _format_colors(colors: list[str]) -> str:
+    """Render a color list as natural prose ('ecru and rust' vs 'indigo,
+    rinse and off-white'). Keeps the fallback prose visually distinct
+    across uploads with different palettes."""
+    cs = [c for c in colors[:3] if c]
+    if not cs:
+        return "a neutral palette"
+    if len(cs) == 1:
+        return cs[0]
+    if len(cs) == 2:
+        return f"{cs[0]} and {cs[1]}"
+    return f"{cs[0]}, {cs[1]} and {cs[2]}"
 
 
 @dataclass
@@ -780,9 +822,124 @@ def _infer_flavor(blob: str) -> _Flavor:
             price_logic="going-out earns a price premium because the cost-per-wear is event-driven, not daily.",
         )
 
-    # Default: contemporary casualwear
+    if has("knit", "sweater", "cardigan", "pullover", "jumper"):
+        return _Flavor(
+            tier="elevated knitwear", momentum="entering its core-wardrobe phase globally",
+            cultural_fit="the slow-fashion / texture-led consumer shift",
+            season_window="The pre-winter window (October through January)",
+            cultural_moment="Cable knits and ribbed gauges dominate the global lookbook feed this quarter.",
+            consumer_geo="Urban tier-1 woman", consumer_age="26-40",
+            consumer_income="household income INR 10-22L",
+            consumer_media="Pinterest + slow-fashion newsletters + global e-comm browsing",
+            occasion="travel layering, office cold-rooms, weekend hill-station trips",
+            wardrobe_role="the texture moment in an otherwise smooth wardrobe",
+            color_stack=2, tier2_week=4, capsule_size=4,
+            fabric_spec="9-gauge / 12-gauge cotton-blend knit, 320-380 gsm",
+            complexity="medium",
+            trims="ribbed cuff and hem, set-in shoulder, branded woven label",
+            adjacent_skus="a wide-leg trouser and a light scarf",
+            price_logic="knitwear sustains 2x the markup of a tee at similar fabric cost.",
+        )
+
+    if has("dress", "midi", "maxi", "shirt-dress", "wrap"):
+        return _Flavor(
+            tier="occasion dressing", momentum="resurgent with the brunch / day-event cycle",
+            cultural_fit="the post-pandemic 'I want to dress up' wardrobe correction",
+            season_window="The festive build-up + wedding season (September-February)",
+            cultural_moment="Day-event dressing is the fastest-growing women's category in tier-1 metros.",
+            consumer_geo="Urban tier-1 + emerging tier-2 woman", consumer_age="24-36",
+            consumer_income="household income INR 8-20L",
+            consumer_media="Instagram + wedding-Instagram + Pinterest",
+            occasion="day weddings, sangeet brunches, office-to-event, anniversaries",
+            wardrobe_role="the photogenic SKU that earns the cost-per-wear",
+            color_stack=2, tier2_week=4, capsule_size=5,
+            fabric_spec="lightweight viscose-blend or poplin, 80-110 gsm with a fluid drape",
+            complexity="medium",
+            trims="self-tie waist, hidden side zip, soft shoulder gather",
+            adjacent_skus="a structured handbag SKU and a slip-on flat",
+            price_logic="occasion dressing earns a premium because the event-driven cost-per-wear math is generous.",
+        )
+
+    if has("hoodie", "sweatshirt", "t-shirt", "tee", "tank", "polo"):
+        return _Flavor(
+            tier="elevated basics", momentum="steady-state with the streetwear-to-quiet-luxury bleed",
+            cultural_fit="the volume-and-drape silhouette swing in casualwear",
+            season_window="Pre-monsoon refresh (June-July) and the post-EOSS reset",
+            cultural_moment="Oversized basics in elevated cotton are still the highest-velocity SKU on the urban floor.",
+            consumer_geo="Urban tier-1 woman + Gen-Z college", consumer_age="20-30",
+            consumer_income="household income INR 5-15L",
+            consumer_media="Instagram Reels + creator hauls",
+            occasion="college, work-from-cafe, weekend brunch, errands",
+            wardrobe_role="the daily-wear silhouette that defines the wardrobe baseline",
+            color_stack=3, tier2_week=4, capsule_size=6,
+            fabric_spec="200-240 gsm cotton jersey, brushed interior for hand-feel",
+            complexity="easy",
+            trims="ribbed neck tape, double-needle hem, dropped shoulder seam",
+            adjacent_skus="a wide-leg cargo and a baseball cap",
+            price_logic="elevated basics rely on volume × price discipline; the markup is in the hand-feel, not the silhouette.",
+        )
+
+    if has("coat", "jacket", "blazer", "outerwear", "trench"):
+        return _Flavor(
+            tier="elevated outerwear", momentum="building with the layering / travel narrative",
+            cultural_fit="the transitional-weather wardrobe gap in metros",
+            season_window="The hill-station travel + pre-winter window (October-December)",
+            cultural_moment="Outerwear is the highest-margin pickup in the tier-1 metro basket.",
+            consumer_geo="Urban tier-1 metro woman + frequent traveller", consumer_age="28-42",
+            consumer_income="household income INR 12-28L",
+            consumer_media="Pinterest + travel Instagram + LinkedIn",
+            occasion="travel, office layering, evening events, weekend escapes",
+            wardrobe_role="the SKU that anchors the whole outfit underneath it",
+            color_stack=2, tier2_week=6, capsule_size=4,
+            fabric_spec="280-320 gsm cotton-twill or poly-wool blend, with a sturdy fused interlining",
+            complexity="hard",
+            trims="horn-finish buttons, contrast lining, functional welt pockets",
+            adjacent_skus="a wide-leg trouser and a fine-gauge turtleneck",
+            price_logic="outerwear holds the highest absolute margin in the assortment; the buyer accepts a long cost-per-wear horizon.",
+        )
+
+    if has("skirt", "shorts", "culottes"):
+        return _Flavor(
+            tier="casual layering", momentum="cyclical with the wide-leg / volume swing",
+            cultural_fit="the bottom-half silhouette refresh post-jeggings",
+            season_window="Pre-monsoon to early-monsoon (June-August)",
+            cultural_moment="Knee-and-below skirts and longer shorts dominate the urban Pinterest feed.",
+            consumer_geo="Urban tier-1 woman", consumer_age="22-34",
+            consumer_income="household income INR 6-15L",
+            consumer_media="Pinterest + Instagram",
+            occasion="college, work-from-cafe, weekend, day-event",
+            wardrobe_role="the bottom-half that does the styling work for a simple top",
+            color_stack=2, tier2_week=5, capsule_size=5,
+            fabric_spec="180-220 gsm cotton-poplin or linen-blend with a structured drape",
+            complexity="easy",
+            trims="invisible side zip, self-belt loops, faced waistband",
+            adjacent_skus="a tucked-in tee and a soft cotton shirt",
+            price_logic="skirts and shorts price under jeans at similar margin; volume comes from the styling story.",
+        )
+
+    if has("co-ord", "co ord", "matching set", "set", "twin set"):
+        return _Flavor(
+            tier="coordinated set", momentum="peaking with the matching-look social narrative",
+            cultural_fit="the 'one-pick outfit' simplification trend",
+            season_window="Festive + post-EOSS refresh (September-November)",
+            cultural_moment="Matching sets photograph as 'a look' on Reels — high social-velocity SKU.",
+            consumer_geo="Urban tier-1 woman", consumer_age="22-32",
+            consumer_income="household income INR 7-16L",
+            consumer_media="Instagram Reels + creator hauls",
+            occasion="brunch, day-event, festive day-2, low-stakes wedding",
+            wardrobe_role="the outfit that doesn't require styling effort",
+            color_stack=2, tier2_week=4, capsule_size=4,
+            fabric_spec="lightweight viscose-blend or linen-blend, 110-140 gsm with a soft drape",
+            complexity="medium",
+            trims="self-belt, hidden zip on the bottom, faced neck on top",
+            adjacent_skus="a layering jacket and an accent bag",
+            price_logic="co-ord sets bundle two SKUs at a single MRP — the perceived discount drives basket size.",
+        )
+
+    # Default: contemporary casualwear — uses pooled vision data for variation
+    # so even the 'no specific bucket' path doesn't read as identical text.
     return _Flavor(
-        tier="quiet-luxury contemporary", momentum="building steadily in global retail",
+        tier="elevated contemporary", momentum="building steadily in global retail",
         cultural_fit="the elevated-mass shift away from logo-driven dressing",
         season_window="The end-of-monsoon refresh into festive prep (September-November)",
         cultural_moment="Pinterest saves on minimal contemporary silhouettes are up across India.",
