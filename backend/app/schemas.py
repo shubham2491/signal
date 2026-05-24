@@ -119,6 +119,8 @@ class AnalysisReport(BaseModel):
     price_anchor_inr: str = ""        # short: aspirational anchor (e.g. "Zara INR 2,990")
     price_floor_inr: str = ""         # short: Indian value-floor band (e.g. "INR 499-899")
     price_target_inr: str = ""        # short: recommended MRP (e.g. "INR 999-1,299")
+    # Visibility: did the LLM return a real read, or did we fall back?
+    data_source: Literal["live", "partial", "fallback"] = "live"
 
 
 class TextBriefRequest(BaseModel):

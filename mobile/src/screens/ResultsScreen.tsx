@@ -98,6 +98,25 @@ export function ResultsScreen() {
           </ScrollView>
         ) : null}
 
+        {/* ─── DATA-SOURCE BANNER (when AI was partial / unreachable) ──── */}
+        {report.data_source && report.data_source !== 'live' ? (
+          <View style={[styles.padX, { marginTop: spacing.md }]}>
+            <View style={[
+              styles.dataBanner,
+              report.data_source === 'fallback' ? styles.dataBannerWarn : styles.dataBannerInfo,
+            ]}>
+              <Text style={styles.dataBannerKicker}>
+                {report.data_source === 'fallback' ? 'OFFLINE BRIEF' : 'PARTIAL READ'}
+              </Text>
+              <Text style={styles.dataBannerText}>
+                {report.data_source === 'fallback'
+                  ? "The AI commentary service didn't respond — this brief is generated from the vision read alone. Sections will be less specific than a live read."
+                  : "The AI read returned partial commentary; missing sections were backfilled from the vision read. Re-run for the full take."}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
         {/* ─── THE INDIA TRANSLATION (main hook) ────────────────── */}
         <View style={styles.padX}>
           <View style={{ height: spacing.xl }} />
@@ -679,6 +698,20 @@ const styles = StyleSheet.create({
   readRowValue: { ...type.bodySm, color: colors.text, flex: 1 },
 
   ctaRow: { marginTop: spacing.xl },
+
+  // Data-source banner
+  dataBanner: {
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    borderLeftWidth: 3,
+  },
+  dataBannerWarn: { backgroundColor: colors.burgundySoft, borderLeftColor: colors.burgundy },
+  dataBannerInfo: { backgroundColor: colors.surfaceMuted, borderLeftColor: colors.textMuted },
+  dataBannerKicker: {
+    fontSize: 10, letterSpacing: 1.6, fontWeight: '700',
+    color: colors.text, marginBottom: spacing.xs,
+  },
+  dataBannerText: { ...type.bodySm, color: colors.text, lineHeight: 18 },
 
   // Per-category
   byCatLead: { ...type.bodySm, color: colors.textMuted, marginBottom: spacing.sm },

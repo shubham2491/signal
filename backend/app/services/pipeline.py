@@ -103,6 +103,7 @@ async def analyze_brief(brief: str) -> AnalysisReport:
         price_anchor_inr=top_level.get("price_anchor_inr", ""),
         price_floor_inr=top_level.get("price_floor_inr", ""),
         price_target_inr=top_level.get("price_target_inr", ""),
+        data_source=top_level.get("data_source", "live"),
     )
 
 
@@ -148,6 +149,7 @@ async def analyze(images: list[bytes]) -> AnalysisReport:
         price_anchor_inr=top_level.get("price_anchor_inr", ""),
         price_floor_inr=top_level.get("price_floor_inr", ""),
         price_target_inr=top_level.get("price_target_inr", ""),
+        data_source=top_level.get("data_source", "live"),
     )
 
 
@@ -181,6 +183,7 @@ async def _build_section(reads: list[ImageRead], mode: Mode) -> dict:
         "price_anchor_inr": commentary.get("price_anchor_inr", ""),
         "price_floor_inr": commentary.get("price_floor_inr", ""),
         "price_target_inr": commentary.get("price_target_inr", ""),
+        "data_source": commentary.get("data_source", "live"),
     }
 
 

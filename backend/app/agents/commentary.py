@@ -26,6 +26,7 @@ shelf", "the metro fast-fashion floor" instead.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from app.data.brands import Brand
@@ -166,7 +167,9 @@ async def run(
     brand_block = _brand_block(brands, search_results)
 
     if not llm.is_available:
-        return _mock_commentary(brands, pooled)
+        out = _mock_commentary(brands, pooled)
+        out["data_source"] = "fallback"
+        return out
 
     user_text = f"""
 Mode: {mode}
@@ -192,10 +195,35 @@ narrative sections NEVER name an Indian retailer.
     try:
         data = await llm.text_json(system=SYSTEM, user_text=user_text, schema_hint=SCHEMA)
     except Exception as e:
-        log.warning("Commentary LLM call failed, using mock: %s", e)
-        return _mock_commentary(brands, pooled)
+        log.warning("Commentary LLM call failed (%s: %s), falling back to dynamic mock", type(e).__name__, e)
+        out = _mock_commentary(brands, pooled)
+        out["data_source"] = "fallback"
+        return out
 
-    return _sanitize(data, brands, pooled)
+    # Track partial-output state: if more than half of the narrative fields are
+    # empty after parsing, the LLM probably got truncated. We still ship what
+    # we have but flag it so the UI can show a 'partial read' notice and we
+    # avoid backfilling everything with stale mock copy.
+    narrative_fields = ("commentary", "consumer", "why_now", "india_play",
+                        "price_strategy", "production_notes", "merchandising")
+    empty_count = sum(1 for k in narrative_fields if not str(data.get(k, "")).strip())
+    sanitized = _sanitize(data, brands, pooled)
+    if empty_count >= len(narrative_fields) // 2:
+        log.warning("Commentary partial (%d/%d narrative fields empty) — backfilling with dynamic mock",
+                    empty_count, len(narrative_fields))
+        # Backfill only the empty narrative fields with dynamic mock content.
+        mock = _mock_commentary(brands, pooled)
+        for k in narrative_fields:
+            if not sanitized.get(k):
+                sanitized[k] = mock[k]
+        # Also backfill the structured price fields if missing.
+        for k in ("price_anchor_inr", "price_floor_inr", "price_target_inr"):
+            if not sanitized.get(k):
+                sanitized[k] = mock[k]
+        sanitized["data_source"] = "partial"
+    else:
+        sanitized["data_source"] = "live"
+    return sanitized
 
 
 def _pool(reads: list[ImageRead]) -> dict[str, list[str]]:
@@ -305,60 +333,258 @@ def _sanitize(data: dict[str, Any], brands: list[Brand], pooled: dict[str, list[
 
 
 def _mock_commentary(brands: list[Brand], pooled: dict[str, list[str]]) -> dict[str, Any]:
-    obs = " ".join(pooled["aesthetics"][:2] + pooled["categories"][:1]).title() or "Quiet Casual Mid-Premium"
-    aesthetic_phrase = pooled["aesthetics"][0] if pooled["aesthetics"] else "casual contemporary"
+    """Build a brief that *uses* the actual pooled vision facets so every
+    upload produces unique-feeling output, even when the LLM is down.
+
+    Reads the dominant aesthetic, category, color, silhouette tokens from the
+    pool and uses them to pick:
+      - a flavor profile (occasion / fabric / construction)
+      - a season window
+      - price-ladder math based on the detected market segment
+    """
+    # Pull the most salient signals.
+    aesthetics = pooled["aesthetics"] or ["contemporary"]
+    categories = pooled["categories"] or ["apparel"]
+    colors = pooled["colors"] or ["neutral"]
+    silhouettes = pooled["silhouettes"] or ["regular"]
+    segments = pooled["segments"] or ["mid-premium"]
+    keywords = pooled["keywords"] or aesthetics + categories
+
+    lead_aesthetic = aesthetics[0]
+    lead_category = categories[0]
+    lead_color = colors[0]
+    lead_silhouette = silhouettes[0]
+    lead_segment = segments[0].lower() if segments else "mid-premium"
+
+    # Build an observation — short, editorial, derived from facets.
+    obs_bits = [
+        lead_aesthetic.title(),
+        lead_silhouette.title() if lead_silhouette != "regular" else "",
+        lead_category.title(),
+    ]
+    observation = " ".join([b for b in obs_bits if b]).strip()[:64] or "Editorial Read"
+
+    # Flavor profile inferred from aesthetic + category text.
+    blob = " ".join(aesthetics + categories + keywords).lower()
+    profile = _infer_flavor(blob)
+
+    # Brand signals: rank by quick keyword match into the brand's DNA so the
+    # similarity isn't always Strong/Adjacent/Moderate in the same order.
     sigs = []
     for i, b in enumerate(brands):
-        sim = ["Strong", "Adjacent", "Moderate", "Moderate", "Weak"][min(i, 4)]
+        score = sum(1 for token in (aesthetics + keywords) if any(token.lower() in a for a in b.aesthetics))
+        if score >= 3:
+            sim = "Strong"
+        elif score == 2:
+            sim = "Adjacent"
+        elif score == 1:
+            sim = "Moderate"
+        else:
+            sim = ["Adjacent", "Moderate", "Moderate", "Weak", "Weak"][min(i, 4)]
+        rationale = (
+            f"{b.name}'s current floor runs adjacent to this {lead_aesthetic} {lead_category} "
+            f"read — {('strong' if sim == 'Strong' else 'partial')} DNA to translate."
+        )
         sigs.append(BrandSignal(
             brand=b.name, similarity=sim,  # type: ignore[arg-type]
-            rationale=f"{b.name}'s current floor leans {aesthetic_phrase} — strong DNA to translate.",
-            citations=[],
+            rationale=rationale[:220], citations=[],
         ).model_dump())
+
+    # Price ladder math: derive from market segment + flavor profile.
+    anchor_name, anchor_price, floor_band, target_band = _price_ladder(brands, lead_segment, profile)
+
     return {
-        "observation": obs,
-        "summary": "Quiet-luxury minimalism translating from European fast-fashion into the Indian aspirational-mass tier.",
+        "observation": observation,
+        "summary": (
+            f"{lead_aesthetic.capitalize()} {lead_category} read in a "
+            f"{lead_color} palette — translating from a global {profile.tier} aesthetic "
+            f"into the Indian {lead_segment} floor."
+        )[:220],
         "brand_signals": sigs,
         "commentary": (
-            "This is the Zara / COS quiet-luxury moment hitting peak globally — restrained palette, "
-            "elevated proportions, a Mango-style ease of styling. The editorial signal is strong: "
-            "Pinterest saves are up, the look reads in both office and weekend modes, and it survives "
-            "the Indian climate without compromise. Right now this aesthetic carries the credibility "
-            "of European retail without the maison-tier price burden."
+            f"The look reads as {lead_aesthetic} — proportions tilt toward {lead_silhouette}, "
+            f"palette anchored in {lead_color}. The {profile.tier} narrative is "
+            f"{profile.momentum} globally right now, and {profile.cultural_fit} translates "
+            f"cleanly into the Indian {lead_segment} consumer's reference set. "
+            f"This is the moment to translate it before the silhouette commoditises."
         ),
         "consumer": (
-            "Urban tier-1 woman, 24-34, white-collar or freelance creative, household income INR "
-            "8-18L. Heavy Pinterest / Instagram diet; currently saves Zara purchases for end-of-season. "
-            "Worn for office, brunch, work-from-cafe, low-key weddings — the wardrobe spine, not the showpiece."
+            f"{profile.consumer_geo}, {profile.consumer_age}, "
+            f"{profile.consumer_income}. Media diet: {profile.consumer_media}. "
+            f"Worn for {profile.occasion} — {profile.wardrobe_role}."
         ),
         "why_now": (
-            "Post-monsoon refresh + the pre-festive build-up creates an 8-week window where mid-premium "
-            "shoppers reset their basics layer. The quiet-luxury narrative also aligns with the "
-            "after-effect of celebrity capsule drops dominating Indian Instagram this quarter."
+            f"{profile.season_window} is the natural drop window for this read. "
+            f"{profile.cultural_moment}"
         ),
         "india_play": (
-            "Drop tier-1 metro stores first (Mumbai, Delhi-NCR, Bangalore, Hyderabad) in week 1, with "
-            "a 3-color stack on the lead SKU and 2-color on support. Hold tier-2/3 carry-over for week 5 "
-            "once sell-through validates the silhouette. Format as a 6-SKU capsule so it reads as a "
-            "story on the floor rather than a one-off."
+            f"Drop tier-1 metros first (Mumbai, Delhi-NCR, Bangalore, Hyderabad) in week 1 with "
+            f"a {profile.color_stack} color stack on the hero SKU. Hold tier-2/3 carry-over for "
+            f"week {profile.tier2_week} once sell-through validates. Format as a "
+            f"{profile.capsule_size}-SKU capsule so the floor reads as a story, not a one-off."
         ),
         "price_strategy": (
-            "Aspirational anchor: Zara INR 2,990. The urban value floor lands the same silhouette "
-            "around INR 599-899 today. Recommended MRP INR 999-1,299 — that 60% discount to Zara is "
-            "the headroom to capture the shopper who currently waits for Zara EOSS, while the 30-50% "
-            "premium over the value floor protects margin and signals the elevated read."
+            f"Aspirational anchor: {anchor_name} {anchor_price}. The urban value floor lands "
+            f"the same silhouette at {floor_band} today. Recommended MRP {target_band} — "
+            f"{profile.price_logic}"
         ),
-        "price_anchor_inr": "Zara INR 2,990",
-        "price_floor_inr": "INR 599-899",
-        "price_target_inr": "INR 999-1,299",
-        "palette": pooled["colors"][:6] or ["ecru", "rust", "olive", "off-white", "burnt sienna"],
+        "price_anchor_inr": f"{anchor_name} {anchor_price}",
+        "price_floor_inr": floor_band,
+        "price_target_inr": target_band,
+        "palette": colors[:6],
         "production_notes": (
-            "200 gsm cotton jersey, brushed interior for hand-feel; medium complexity at scale. "
-            "Critical trims: ribbed neck tape, centered chest placement print, double-needle hem."
+            f"{profile.fabric_spec}; {profile.complexity} complexity at scale. "
+            f"Critical trims: {profile.trims}."
         ),
         "merchandising": (
-            "Drop alongside a wide-leg cargo and an open-weave knit so the capsule reads as a "
-            "complete story. Stack 3 colors on the hero SKU; 2 on supports."
+            f"Drop alongside {profile.adjacent_skus} so the capsule reads complete. "
+            f"Stack {profile.color_stack} colors deep on the hero, 2 on supports."
         ),
-        "keywords": pooled["keywords"][:8] or ["oversized", "neutral", "minimal", "casual", "contemporary"],
+        "keywords": keywords[:8],
     }
+
+
+@dataclass
+class _Flavor:
+    tier: str
+    momentum: str
+    cultural_fit: str
+    season_window: str
+    cultural_moment: str
+    consumer_geo: str
+    consumer_age: str
+    consumer_income: str
+    consumer_media: str
+    occasion: str
+    wardrobe_role: str
+    color_stack: int
+    tier2_week: int
+    capsule_size: int
+    fabric_spec: str
+    complexity: str
+    trims: str
+    adjacent_skus: str
+    price_logic: str
+
+
+def _infer_flavor(blob: str) -> _Flavor:
+    """Pick one of a handful of pre-rolled flavor profiles based on the
+    pooled vision text. Each flavor wires up consumer / season / fabric /
+    price logic that fits the look."""
+    has = lambda *tokens: any(t in blob for t in tokens)
+
+    if has("ethnic", "kurta", "saree", "lehenga", "festive", "indo", "handloom"):
+        return _Flavor(
+            tier="craft / indo-fusion", momentum="peaking with the festive build-up",
+            cultural_fit="the regional craft revival",
+            season_window="The festive-to-wedding bridge (October through February)",
+            cultural_moment="Wedding-season demand pulls handloom + occasion-wear right now.",
+            consumer_geo="Urban tier-1 + emerging tier-2 woman", consumer_age="28-42",
+            consumer_income="household income INR 12-25L",
+            consumer_media="Instagram / Pinterest / wedding-Instagram inspiration",
+            occasion="mehendi, sangeet, day-time wedding events, festive office wear",
+            wardrobe_role="the lehenga-alternative that still photographs",
+            color_stack=2, tier2_week=3, capsule_size=8,
+            fabric_spec="120 gsm chanderi-blend / mul cotton, with selective hand-block detailing",
+            complexity="medium-to-high",
+            trims="hand-block placement, tassel ties, contrast piping",
+            adjacent_skus="a coordinating dupatta and a layering jacket",
+            price_logic="the craft narrative justifies the premium; volume is secondary to margin and brand cred.",
+        )
+
+    if has("denim", "wide-leg", "indigo", "rinse", "jean"):
+        return _Flavor(
+            tier="elevated denim", momentum="resurgent with the wide-leg silhouette swing",
+            cultural_fit="the post-skinny denim reset",
+            season_window="The pre-monsoon to mid-monsoon window (June-September)",
+            cultural_moment="Wide-leg denim is taking shelf share from skinny across global retail.",
+            consumer_geo="Urban tier-1 woman", consumer_age="22-32",
+            consumer_income="household income INR 6-15L",
+            consumer_media="Instagram + YouTube hauls + TikTok adjacent",
+            occasion="college, work-from-cafe, weekend brunch",
+            wardrobe_role="the silhouette refresh that signals 'on-trend' without trying",
+            color_stack=3, tier2_week=5, capsule_size=6,
+            fabric_spec="12-14 oz cotton denim, mid-rinse with selective whiskering",
+            complexity="medium",
+            trims="metal shank button, antique copper rivets, classic 5-pocket detailing",
+            adjacent_skus="a cropped tee and an unstructured cotton jacket",
+            price_logic="denim sustains a higher MRP than its cost suggests; the silhouette is the markup.",
+        )
+
+    if has("tailor", "blazer", "trouser", "suit", "office", "smart-casual"):
+        return _Flavor(
+            tier="elevated tailoring", momentum="steady-state with quiet-luxury tailwind",
+            cultural_fit="the return-to-office and the polished-creative consumer",
+            season_window="Post-monsoon refresh (September-November) and the New Year reset",
+            cultural_moment="Return-to-office and creator-economy 'polished' aesthetics align.",
+            consumer_geo="Urban tier-1 metro professional", consumer_age="26-38",
+            consumer_income="household income INR 10-25L",
+            consumer_media="LinkedIn Instagram + curated Pinterest boards",
+            occasion="office-to-evening, client meetings, day-of-the-wedding office",
+            wardrobe_role="the wardrobe spine that elevates everything around it",
+            color_stack=2, tier2_week=6, capsule_size=5,
+            fabric_spec="220-260 gsm wool-poly suiting with TR blend for the Indian climate",
+            complexity="hard",
+            trims="horn-finish buttons, half-canvas construction, contrast lining",
+            adjacent_skus="a matching trouser and a fine-gauge knit",
+            price_logic="tailoring rewards margin protection; the silhouette signals the price-point.",
+        )
+
+    if has("y2k", "going-out", "satin", "slip", "party", "club", "cropped"):
+        return _Flavor(
+            tier="Y2K going-out", momentum="peaking with the millennial-Y2K nostalgia cycle",
+            cultural_fit="the going-out wardrobe gap post-pandemic",
+            season_window="The wedding-season bridge + New Year + Valentine's window",
+            cultural_moment="Going-out aesthetics dominate Reels and the wedding-season Instagram feed.",
+            consumer_geo="Urban tier-1 metro woman", consumer_age="20-28",
+            consumer_income="household income INR 6-14L (with discretionary on going-out)",
+            consumer_media="Reels + Instagram + influencer hauls",
+            occasion="cocktail nights, sangeet after-parties, New Year, date nights",
+            wardrobe_role="the one piece that earns its cost-per-wear across 6 events",
+            color_stack=2, tier2_week=4, capsule_size=4,
+            fabric_spec="silk-touch satin, 80-100 gsm with a soft drape and a slip lining",
+            complexity="medium",
+            trims="bias binding, adjustable straps, hidden side zip",
+            adjacent_skus="a matching cropped jacket and a sheer overlay top",
+            price_logic="going-out earns a price premium because the cost-per-wear is event-driven, not daily.",
+        )
+
+    # Default: contemporary casualwear
+    return _Flavor(
+        tier="quiet-luxury contemporary", momentum="building steadily in global retail",
+        cultural_fit="the elevated-mass shift away from logo-driven dressing",
+        season_window="The end-of-monsoon refresh into festive prep (September-November)",
+        cultural_moment="Pinterest saves on minimal contemporary silhouettes are up across India.",
+        consumer_geo="Urban tier-1 woman", consumer_age="24-34",
+        consumer_income="household income INR 8-18L",
+        consumer_media="Pinterest + Instagram + global e-comm browsing",
+        occasion="office, brunch, work-from-cafe, low-key wedding events",
+        wardrobe_role="the wardrobe spine, not the showpiece",
+        color_stack=3, tier2_week=5, capsule_size=6,
+        fabric_spec="200 gsm cotton jersey, brushed interior for hand-feel",
+        complexity="medium",
+        trims="ribbed neck tape, double-needle hem, centered placement print",
+        adjacent_skus="a wide-leg cargo and an open-weave knit",
+        price_logic="the 30-50% premium over the value floor protects margin and signals the elevated read.",
+    )
+
+
+def _price_ladder(brands: list[Brand], segment: str, profile: _Flavor) -> tuple[str, str, str, str]:
+    """Pick an aspirational anchor brand + INR ladder.
+
+    Anchor pulled from the first global_aspirational brand in the candidate
+    set so the named brand stays consistent with what the user sees in the
+    Brand Signals section."""
+    anchor = next((b for b in brands if b.segment == "global_aspirational"), brands[0] if brands else None)
+    anchor_name = anchor.name if anchor else "Zara"
+
+    # Segment-driven ladder math.
+    seg = segment.lower()
+    if "mass" in seg or "value" in seg:
+        return anchor_name, "INR 1,790", "INR 299-499", "INR 599-799"
+    if "premium" in seg and "mid" not in seg:
+        return anchor_name, "INR 4,990", "INR 1,299-1,799", "INR 1,999-2,499"
+    if "luxury" in seg:
+        return anchor_name, "INR 8,990", "INR 2,499-3,499", "INR 3,499-4,499"
+    # Default: mid-premium
+    return anchor_name, "INR 2,990", "INR 599-899", "INR 999-1,299"

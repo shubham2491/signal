@@ -101,6 +101,7 @@ export type AnalysisReport = {
   price_anchor_inr?: string;
   price_floor_inr?: string;
   price_target_inr?: string;
+  data_source?: 'live' | 'partial' | 'fallback';
 };
 
 export type UploadImage = { uri: string; name: string; mime: string };

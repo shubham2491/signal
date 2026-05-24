@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 # Hard per-call ceiling. Tuned for Gemini Flash p95 (~6-10s) with headroom.
 LLM_CALL_TIMEOUT_S = 25.0
+LLM_TEXT_TIMEOUT_S = 70.0  # text_json runs the heavy multi-field commentary call
 
 
 class _Backend(Protocol):
@@ -59,6 +60,7 @@ class GeminiBackend:
     async def vision_json(
         self, *, system: str, user_text: str, images: list[bytes],
         schema_hint: str = "", temperature: float = 0.2,
+        max_output_tokens: int = 4096,
     ) -> dict[str, Any]:
         full_prompt = system
         if schema_hint:
@@ -74,6 +76,7 @@ class GeminiBackend:
                 generation_config={
                     "temperature": temperature,
                     "response_mime_type": "application/json",
+                    "max_output_tokens": max_output_tokens,
                 },
             )
             return resp.text or "{}"
@@ -84,6 +87,7 @@ class GeminiBackend:
     async def text_json(
         self, *, system: str, user_text: str,
         schema_hint: str = "", temperature: float = 0.3,
+        max_output_tokens: int = 4096,
     ) -> dict[str, Any]:
         full_prompt = system
         if schema_hint:
@@ -96,6 +100,7 @@ class GeminiBackend:
                 generation_config={
                     "temperature": temperature,
                     "response_mime_type": "application/json",
+                    "max_output_tokens": max_output_tokens,
                 },
             )
             return resp.text or "{}"
@@ -183,16 +188,44 @@ class LLMClient:
         return await asyncio.wait_for(self._backend.vision_json(**kw), timeout=LLM_CALL_TIMEOUT_S)
 
     async def text_json(self, **kw) -> dict[str, Any]:
-        return await asyncio.wait_for(self._backend.text_json(**kw), timeout=LLM_CALL_TIMEOUT_S)
+        return await asyncio.wait_for(self._backend.text_json(**kw), timeout=LLM_TEXT_TIMEOUT_S)
 
 
 def _parse_json(raw: str) -> dict[str, Any]:
     try:
         out = json.loads(raw)
         return out if isinstance(out, dict) else {}
-    except json.JSONDecodeError:
-        log.warning("LLM returned non-JSON, falling back to empty dict: %r", raw[:200])
+    except json.JSONDecodeError as e:
+        # Try to recover from common truncation by trimming to the last valid
+        # closing brace. Helps when max_output_tokens cut us off mid-field.
+        recovered = _try_recover_truncated_json(raw)
+        if recovered is not None:
+            log.warning("LLM returned truncated JSON, recovered partial: %d keys", len(recovered))
+            return recovered
+        log.warning("LLM returned non-JSON (%s), raw[:400]=%r", e, raw[:400])
         return {}
+
+
+def _try_recover_truncated_json(raw: str) -> dict[str, Any] | None:
+    """Last-ditch: if JSON is cut off mid-value, find the last clean key/value
+    boundary and close the object. Returns whatever we managed to parse."""
+    if not raw or not raw.lstrip().startswith("{"):
+        return None
+    # Walk backwards from the end, looking for a position where we can close
+    # the object cleanly (after a complete value, before any trailing junk).
+    for end in range(len(raw) - 1, 0, -1):
+        ch = raw[end]
+        if ch in (",", "{"):
+            continue
+        if ch in ("}", "]", '"', "0123456789"[0]) or ch.isdigit() or ch.isalpha():
+            try:
+                # Trim any trailing comma, then close the outer object.
+                candidate = raw[: end + 1].rstrip().rstrip(",") + "}"
+                out = json.loads(candidate)
+                return out if isinstance(out, dict) else None
+            except json.JSONDecodeError:
+                continue
+    return None
 
 
 _singleton: LLMClient | None = None
