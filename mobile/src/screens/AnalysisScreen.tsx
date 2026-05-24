@@ -80,7 +80,7 @@ export function AnalysisScreen() {
           CommonActions.reset({
             index: 1,
             routes: [
-              { name: 'Home' },
+              { name: 'Tabs' },
               { name: 'Results', params: { report, thumbnails } },
             ],
           }),

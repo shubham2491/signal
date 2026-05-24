@@ -3,6 +3,10 @@
 Two providers: Gemini (default, free tier) and OpenAI. Selected via
 LLM_PROVIDER env var. Both expose the same `vision_json` / `text_json`
 interface, returning a dict parsed from JSON.
+
+All LLM calls are wrapped in a hard timeout (LLM_CALL_TIMEOUT_S) so a
+slow upstream never blocks the analyze pipeline indefinitely — agents
+catch the timeout and fall through to mock output.
 """
 from __future__ import annotations
 
@@ -15,6 +19,9 @@ from typing import Any, Protocol
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
+
+# Hard per-call ceiling. Tuned for Gemini Flash p95 (~6-10s) with headroom.
+LLM_CALL_TIMEOUT_S = 25.0
 
 
 class _Backend(Protocol):
@@ -173,10 +180,10 @@ class LLMClient:
         return self._backend.is_available
 
     async def vision_json(self, **kw) -> dict[str, Any]:
-        return await self._backend.vision_json(**kw)
+        return await asyncio.wait_for(self._backend.vision_json(**kw), timeout=LLM_CALL_TIMEOUT_S)
 
     async def text_json(self, **kw) -> dict[str, Any]:
-        return await self._backend.text_json(**kw)
+        return await asyncio.wait_for(self._backend.text_json(**kw), timeout=LLM_CALL_TIMEOUT_S)
 
 
 def _parse_json(raw: str) -> dict[str, Any]:

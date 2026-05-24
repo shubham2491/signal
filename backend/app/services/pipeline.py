@@ -55,10 +55,13 @@ async def analyze(images: list[bytes]) -> AnalysisReport:
     # Top-level brief covers the whole upload (the user always gets this).
     top_level = await _build_section(reads, mode)
 
-    # Per-group breakdown only kicks in when there's meaningful diversity.
+    # Per-group breakdown — kept lightweight so it doesn't blow latency.
+    # Only kicks in when 2+ category groups are present AND total ≥ 4 images,
+    # and is capped to the 2 largest groups so we never exceed Gemini free-tier
+    # rate limits.
     groups: list[GroupReport] = []
     grouped = _group_by_category(reads)
-    if len(grouped) >= 2 and len(images) >= 3:
+    if len(grouped) >= 2 and len(images) >= 4:
         groups = await _build_group_reports(grouped, mode)
 
     return AnalysisReport(
@@ -114,12 +117,24 @@ def _group_by_category(reads: list[ImageRead]) -> dict[str, list[ImageRead]]:
     return dict(grouped)
 
 
+MAX_SUB_GROUPS = 2  # cap to keep latency + rate-limit budget tight
+
+
 async def _build_group_reports(
     grouped: dict[str, list[ImageRead]], mode: Mode,
 ) -> list[GroupReport]:
-    """Run a sub-pipeline per category group, concurrently."""
-    items = list(grouped.items())
-    tasks = [_build_section(reads, mode) for _, reads in items]
+    """Run a LIGHTWEIGHT sub-pipeline per category group.
+
+    Lightweight = brand_select (free, sync) + commentary only. We skip
+    search (Tavily) and recommendation_agent for sub-groups: directions
+    live on the top-level brief, and brand DNA is enough to ground a
+    short per-category commentary. This cuts the multi-group cost from
+    ~5 LLM calls × N groups down to 1 × min(N, MAX_SUB_GROUPS).
+    """
+    # Largest categories first, capped to MAX_SUB_GROUPS.
+    items = sorted(grouped.items(), key=lambda kv: -len(kv[1]))[:MAX_SUB_GROUPS]
+
+    tasks = [_build_group_section(reads, mode) for _, reads in items]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     out: list[GroupReport] = []
@@ -135,9 +150,24 @@ async def _build_group_reports(
             summary=result["summary"],
             brand_signals=[BrandSignal(**s) for s in result["brand_signals"]],
             commentary=result["commentary"],
-            directions=[d if isinstance(d, Direction) else Direction(**d) for d in result["directions"]],
+            directions=[],  # directions only at the top level
             keywords=result["keywords"],
         ))
-    # Sort by image count desc so the biggest category leads.
-    out.sort(key=lambda g: -len(g.image_indices))
     return out
+
+
+async def _build_group_section(reads: list[ImageRead], mode: Mode) -> dict:
+    """Lightweight per-group flow: brand_select + commentary only.
+    No search, no recommendations — keeps latency bounded."""
+    brands = brand_selector.select(reads, top_k=4)
+    # Empty search_results forces commentary to reason from brand DNA only.
+    commentary = await commentary_agent.run(
+        reads=reads, brands=brands, search_results={}, mode=mode,
+    )
+    return {
+        "observation": commentary["observation"],
+        "summary": commentary["summary"],
+        "brand_signals": commentary["brand_signals"],
+        "commentary": commentary["commentary"],
+        "keywords": commentary["keywords"],
+    }
