@@ -5,11 +5,21 @@ construction: the prompt instructs the model to ignore faces, body, identity.
 
 For >1 images we send them in one call (per-image entries indexed) so the
 model can produce internally consistent reads.
+
+Fallback path: if the LLM vision call fails (timeout, quota, network),
+we DON'T return a hardcoded mock — that's how 'every upload gives the
+same brief' bugs happen. Instead we extract the dominant palette from
+the image bytes using PIL and derive a category from the image hash,
+so two different images yield two different mocked reads.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+from io import BytesIO
 from typing import Any
+
+from PIL import Image
 
 from app.schemas import ImageRead, VisionAttributes
 from app.services.llm import get_llm
@@ -101,11 +111,22 @@ SCHEMA = """
 
 
 async def run(images: list[bytes]) -> list[ImageRead]:
+    """Read N images via Gemini Vision.
+
+    Vision is the foundation of every downstream section, so we DO NOT
+    fall back to a mock here — if the call fails after retry, we raise.
+    The pipeline / API layer surfaces the failure as a 503 with the
+    underlying error so the user sees a real failure instead of
+    silently-templated text.
+    """
     if not images:
         return []
     llm = get_llm()
     if not llm.is_available:
-        return _mock_reads(len(images))
+        raise RuntimeError(
+            "Vision unavailable — no LLM provider configured. "
+            "Set GEMINI_API_KEY (or OPENAI_API_KEY)."
+        )
 
     user_text = (
         f"You will see {len(images)} fashion image(s) in order, indexed from 0.\n"
@@ -113,13 +134,9 @@ async def run(images: list[bytes]) -> list[ImageRead]:
         "be 4-8 short tokens a designer could feed into a retailer search\n"
         "(e.g. 'oversized', 'utility', 'neutral palette', 'cropped')."
     )
-    try:
-        data = await llm.vision_json(
-            system=SYSTEM, user_text=user_text, images=images, schema_hint=SCHEMA,
-        )
-    except Exception as e:
-        log.warning("Vision call failed, using mock: %s", e)
-        return _mock_reads(len(images))
+    data = await llm.vision_json(
+        system=SYSTEM, user_text=user_text, images=images, schema_hint=SCHEMA,
+    )
 
     raw_reads = data.get("reads") or []
     out: list[ImageRead] = []
@@ -184,40 +201,182 @@ def _guess_group_from_category(cat: str) -> str:
     return "unknown"
 
 
-def _mock_reads(n: int) -> list[ImageRead]:
-    # Cycle through categories so multi-image demos exercise grouping.
-    presets = [
-        dict(category="drop-shoulder graphic tee", group="top",
-             aesthetic="casual youth, mid-premium",
-             keywords=["oversized", "drop-shoulder", "graphic"]),
-        dict(category="wide-leg high-waist denim", group="bottom",
-             aesthetic="contemporary denim",
-             keywords=["wide-leg", "high-waist", "indigo"]),
-        dict(category="cropped utility jacket", group="outerwear",
-             aesthetic="utility-lite",
-             keywords=["utility", "cropped", "patch-pocket"]),
-        dict(category="straight-cut kurta set", group="ethnic",
-             aesthetic="indo-fusion festive",
-             keywords=["indo-fusion", "festive", "straight-cut"]),
-    ]
+_MOCK_PRESETS = [
+    dict(category="oversized graphic tee",         group="top",
+         silhouette="boxy oversized, hits mid-hip",
+         aesthetic="casual contemporary",
+         keywords=["oversized", "graphic", "casual"]),
+    dict(category="wide-leg high-waist denim",      group="bottom",
+         silhouette="wide-leg, high-rise, full-length",
+         aesthetic="elevated denim casual",
+         keywords=["wide-leg", "high-waist", "denim"]),
+    dict(category="cropped utility jacket",         group="outerwear",
+         silhouette="cropped, structured, boxy",
+         aesthetic="utility outerwear",
+         keywords=["utility", "cropped", "patch-pocket"]),
+    dict(category="straight-cut kurta set",         group="ethnic",
+         silhouette="straight, mid-calf with cigarette pant",
+         aesthetic="indo-fusion festive",
+         keywords=["indo-fusion", "festive", "straight-cut"]),
+    dict(category="midi shirt dress",               group="dress",
+         silhouette="fluid drape, midi length, belted waist",
+         aesthetic="occasion contemporary",
+         keywords=["midi", "shirt-dress", "belted"]),
+    dict(category="ribbed knit cardigan",           group="top",
+         silhouette="cropped, ribbed, slim",
+         aesthetic="elevated knitwear",
+         keywords=["knitwear", "ribbed", "cropped"]),
+    dict(category="tailored blazer",                group="outerwear",
+         silhouette="structured single-breasted, mid-thigh",
+         aesthetic="tailored office european",
+         keywords=["blazer", "tailored", "office"]),
+    dict(category="co-ord linen set",               group="co_ord",
+         silhouette="relaxed top + wide-leg bottom",
+         aesthetic="resort co-ord",
+         keywords=["co-ord", "linen", "resort"]),
+]
+
+
+def _mock_reads_from_images(images: list[bytes]) -> list[ImageRead]:
+    """Build vision reads that actually depend on the image bytes.
+
+    For each image:
+      - Extract the real dominant palette via PIL quantize (no LLM, ~30ms).
+      - Pick a category preset deterministically from the image hash so
+        the same image always yields the same mock, but two different
+        images yield two different mocks.
+      - Tag with a 'vision_unavailable' note so downstream + UI can see
+        this was a graceful fallback, not a live read.
+    """
     out: list[ImageRead] = []
-    for i in range(n):
-        p = presets[i % len(presets)] if n > 1 else presets[0]
+    for i, img_bytes in enumerate(images):
+        h = hashlib.sha1(img_bytes).digest()
+        preset_idx = h[0] % len(_MOCK_PRESETS)
+        p = _MOCK_PRESETS[preset_idx]
+        colors = _extract_palette(img_bytes)
         out.append(ImageRead(
             index=i,
             attributes=VisionAttributes(
                 category=p["category"],
-                silhouette="oversized boxy, hits mid-hip",
-                colors=["ecru", "rust"],
-                fabric_guess="220gsm cotton jersey",
-                styling=["tucked-in"],
-                trims=["ribbed neckline"],
+                silhouette=p["silhouette"],
+                colors=colors,
+                fabric_guess="",
+                styling=[],
+                trims=[],
                 aesthetic=p["aesthetic"],
                 market_segment="mid-premium",
-                notes="mock vision read",
-                shot_type="flatlay",
+                notes=f"vision_unavailable — palette extracted locally, category inferred from image hash ({h[:4].hex()})",
+                shot_type="unknown",
                 category_group=p["group"],
             ),
             keywords=p["keywords"],
         ))
     return out
+
+
+# ─── Local palette extraction (no LLM) ──────────────────────────────
+
+# Map quantized RGB values to trade color names. Coarse but produces a
+# distinct, plausible palette per image without any external call.
+_NAMED_COLOR_SWATCHES: list[tuple[str, tuple[int, int, int]]] = [
+    ("black",       (15, 15, 14)),
+    ("charcoal",    (58, 58, 56)),
+    ("graphite",    (77, 77, 73)),
+    ("grey",        (138, 135, 128)),
+    ("dove",        (183, 179, 168)),
+    ("stone",       (184, 174, 158)),
+    ("white",       (250, 248, 244)),
+    ("off-white",   (245, 241, 230)),
+    ("ivory",       (246, 239, 219)),
+    ("ecru",        (232, 223, 203)),
+    ("cream",       (241, 232, 209)),
+    ("sand",        (217, 196, 160)),
+    ("camel",       (185, 146, 90)),
+    ("tobacco",     (122, 74, 45)),
+    ("rust",        (167, 76, 42)),
+    ("terracotta",  (185, 107, 71)),
+    ("burnt sienna",(157, 74, 42)),
+    ("brick",       (156, 74, 59)),
+    ("burgundy",    (122, 42, 42)),
+    ("wine",        (92, 31, 31)),
+    ("red",         (178, 58, 46)),
+    ("coral",       (227, 120, 104)),
+    ("blush",       (232, 194, 188)),
+    ("peach",       (240, 191, 160)),
+    ("salmon",      (224, 134, 106)),
+    ("mustard",     (201, 155, 48)),
+    ("gold",        (197, 160, 75)),
+    ("ochre",       (194, 138, 48)),
+    ("olive",       (107, 106, 46)),
+    ("moss",        (122, 138, 74)),
+    ("sage",        (156, 170, 138)),
+    ("mint",        (181, 212, 195)),
+    ("forest",      (45, 79, 58)),
+    ("kerala green",(31, 95, 74)),
+    ("teal",        (47, 110, 110)),
+    ("sky",         (138, 176, 204)),
+    ("denim",       (74, 109, 140)),
+    ("cobalt",      (45, 79, 184)),
+    ("indigo",      (45, 62, 112)),
+    ("navy",        (31, 44, 74)),
+    ("midnight",    (15, 27, 46)),
+    ("lavender",    (183, 170, 200)),
+    ("plum",        (107, 58, 85)),
+    ("aubergine",   (63, 36, 56)),
+]
+
+
+def _rgb_to_name(rgb: tuple[int, int, int]) -> str:
+    """Nearest-neighbor lookup in our trade-color table (squared distance)."""
+    r, g, b = rgb
+    best_name = "neutral"
+    best_d = float("inf")
+    for name, (cr, cg, cb) in _NAMED_COLOR_SWATCHES:
+        d = (r - cr) ** 2 + (g - cg) ** 2 + (b - cb) ** 2
+        if d < best_d:
+            best_d = d
+            best_name = name
+    return best_name
+
+
+def _extract_palette(image_bytes: bytes, k: int = 4) -> list[str]:
+    """Quantize the image to k colors and return their trade names.
+
+    De-duplicates so a black tee with white background doesn't return
+    ['black', 'black', 'white', 'black']. Filters out colors that
+    appear in <3% of the pixels — those are usually edge artifacts.
+    """
+    try:
+        img = Image.open(BytesIO(image_bytes)).convert("RGB")
+        img.thumbnail((128, 128))
+        quant = img.quantize(colors=k * 2, method=Image.Quantize.MEDIANCUT)
+        palette_bytes = quant.getpalette() or []
+        # Histogram of which quantized index each pixel maps to.
+        hist = quant.histogram()
+        total = sum(hist) or 1
+        # Pair (count, rgb) sorted by count desc.
+        scored: list[tuple[int, tuple[int, int, int]]] = []
+        for idx in range(k * 2):
+            count = hist[idx] if idx < len(hist) else 0
+            if count / total < 0.03:
+                continue
+            r = palette_bytes[idx * 3] if idx * 3 < len(palette_bytes) else 0
+            g = palette_bytes[idx * 3 + 1] if idx * 3 + 1 < len(palette_bytes) else 0
+            b = palette_bytes[idx * 3 + 2] if idx * 3 + 2 < len(palette_bytes) else 0
+            scored.append((count, (r, g, b)))
+        scored.sort(reverse=True)
+        # Map to names, dedupe while preserving order.
+        seen: set[str] = set()
+        out: list[str] = []
+        for _, rgb in scored:
+            name = _rgb_to_name(rgb)
+            if name in seen:
+                continue
+            seen.add(name)
+            out.append(name)
+            if len(out) >= k:
+                break
+        return out or ["neutral"]
+    except Exception as e:
+        log.warning("palette extraction failed (%s: %s)", type(e).__name__, e)
+        return ["neutral"]

@@ -163,26 +163,26 @@ async def run(
     search_results: dict[str, list[dict]],
     mode: Mode,
 ) -> dict[str, Any]:
-    """Run the commentary chain. Splits the previous monolithic call into
-    THREE parallel focused agents so each LLM request is small, fast and
-    reliable. Each agent has its own retry inside the LLM client.
+    """Run the commentary chain. Three focused sub-agents fire in parallel:
 
-    A. editorial_agent  — observation, summary, brand_signals, commentary, keywords, palette
-    B. translation_agent — consumer, why_now, india_play
-    C. ops_agent        — price_strategy + price_*, production_notes, merchandising
+      A. editorial_agent  — observation, summary, brand_signals, commentary, keywords, palette
+      B. translation_agent — consumer, why_now, india_play
+      C. ops_agent        — price ladder + production + merchandising
 
-    If a single agent fails, ONLY that subsection falls back. The others
-    still show live LLM output. data_source becomes 'live' (all three
-    succeeded), 'partial' (some succeeded, some fell back), or
-    'fallback' (Gemini not configured at all)."""
+    NO mock fallback. If a sub-agent fails after the LLM client's own
+    retries, its fields come back empty. The user sees real failure
+    (data_source='partial' / 'fallback') instead of plausible-looking
+    template prose."""
     llm = get_llm()
     pooled = pool_reads(reads)
     brand_block = _brand_block(brands, search_results)
 
     if not llm.is_available:
-        out = _mock_commentary(brands, pooled)
-        out["data_source"] = "fallback"
-        return out
+        # No provider configured — surface a real error rather than templated text.
+        raise RuntimeError(
+            "LLM unavailable — no provider configured. "
+            "Set GEMINI_API_KEY (or OPENAI_API_KEY)."
+        )
 
     # Fire all three agents in parallel; each retries internally.
     ed_task = _editorial_agent(llm, pooled, brand_block, brands, mode, reads)
@@ -192,57 +192,61 @@ async def run(
         ed_task, tr_task, ops_task, return_exceptions=True,
     )
 
-    mock = _mock_commentary(brands, pooled)
     out: dict[str, Any] = {}
     statuses: list[str] = []
 
     # Editorial: observation, summary, brand_signals, commentary, keywords, palette
     if isinstance(ed_res, dict):
-        out.update({
-            "observation": ed_res.get("observation") or mock["observation"],
-            "summary":     ed_res.get("summary") or mock["summary"],
-            "commentary":  ed_res.get("commentary") or mock["commentary"],
-            "keywords":    ed_res.get("keywords") or mock["keywords"],
-            "palette":     ed_res.get("palette") or mock["palette"],
-            "brand_signals": ed_res.get("brand_signals") or mock["brand_signals"],
-        })
+        out["observation"] = ed_res.get("observation", "").strip()
+        out["summary"]     = ed_res.get("summary", "").strip()
+        out["commentary"]  = ed_res.get("commentary", "").strip()
+        out["keywords"]    = ed_res.get("keywords") or []
+        out["palette"]     = ed_res.get("palette") or [c for c in pooled.get("colors", [])[:6]]
+        out["brand_signals"] = ed_res.get("brand_signals") or _empty_brand_signals(brands)
         statuses.append("editorial:live")
     else:
         log.warning("editorial_agent failed (%s): %s", type(ed_res).__name__, ed_res)
-        for k in ("observation", "summary", "commentary", "keywords", "palette", "brand_signals"):
-            out[k] = mock[k]
+        out["observation"]   = ""
+        out["summary"]       = ""
+        out["commentary"]    = ""
+        out["keywords"]      = []
+        out["palette"]       = [c for c in pooled.get("colors", [])[:6]]
+        out["brand_signals"] = _empty_brand_signals(brands)
         statuses.append("editorial:fallback")
 
     # Translation: consumer, why_now, india_play
     if isinstance(tr_res, dict):
-        out["consumer"]   = tr_res.get("consumer") or mock["consumer"]
-        out["why_now"]    = tr_res.get("why_now") or mock["why_now"]
-        out["india_play"] = tr_res.get("india_play") or mock["india_play"]
+        out["consumer"]   = tr_res.get("consumer", "").strip()
+        out["why_now"]    = tr_res.get("why_now", "").strip()
+        out["india_play"] = tr_res.get("india_play", "").strip()
         statuses.append("translation:live")
     else:
         log.warning("translation_agent failed (%s): %s", type(tr_res).__name__, tr_res)
-        out["consumer"]   = mock["consumer"]
-        out["why_now"]    = mock["why_now"]
-        out["india_play"] = mock["india_play"]
+        out["consumer"]   = ""
+        out["why_now"]    = ""
+        out["india_play"] = ""
         statuses.append("translation:fallback")
 
     # Ops: price ladder, production, merchandising
     if isinstance(ops_res, dict):
-        out["price_strategy"]    = ops_res.get("price_strategy") or mock["price_strategy"]
-        out["price_anchor_inr"]  = ops_res.get("price_anchor_inr") or mock["price_anchor_inr"]
-        out["price_floor_inr"]   = ops_res.get("price_floor_inr") or mock["price_floor_inr"]
-        out["price_target_inr"]  = ops_res.get("price_target_inr") or mock["price_target_inr"]
-        out["production_notes"]  = ops_res.get("production_notes") or mock["production_notes"]
-        out["merchandising"]     = ops_res.get("merchandising") or mock["merchandising"]
+        out["price_strategy"]    = ops_res.get("price_strategy", "").strip()
+        out["price_anchor_inr"]  = ops_res.get("price_anchor_inr", "").strip()
+        out["price_floor_inr"]   = ops_res.get("price_floor_inr", "").strip()
+        out["price_target_inr"]  = ops_res.get("price_target_inr", "").strip()
+        out["production_notes"]  = ops_res.get("production_notes", "").strip()
+        out["merchandising"]     = ops_res.get("merchandising", "").strip()
         statuses.append("ops:live")
     else:
         log.warning("ops_agent failed (%s): %s", type(ops_res).__name__, ops_res)
-        for k in ("price_strategy", "price_anchor_inr", "price_floor_inr",
-                  "price_target_inr", "production_notes", "merchandising"):
-            out[k] = mock[k]
+        out["price_strategy"]    = ""
+        out["price_anchor_inr"]  = ""
+        out["price_floor_inr"]   = ""
+        out["price_target_inr"]  = ""
+        out["production_notes"]  = ""
+        out["merchandising"]     = ""
         statuses.append("ops:fallback")
 
-    # Scrub Indian retailer name leaks from every narrative field, regardless of source.
+    # Scrub Indian retailer name leaks from every narrative field.
     for k in ("commentary", "consumer", "why_now", "india_play",
               "price_strategy", "production_notes", "merchandising"):
         out[k] = _scrub_narrative(out.get(k, ""))
@@ -256,6 +260,17 @@ async def run(
         out["data_source"] = "partial"
     log.info("commentary statuses: %s → data_source=%s", statuses, out["data_source"])
     return out
+
+
+def _empty_brand_signals(brands: list[Brand]) -> list[dict[str, Any]]:
+    return [
+        BrandSignal(
+            brand=b.name, similarity="Weak",
+            rationale="",
+            citations=[],
+        ).model_dump()
+        for b in brands
+    ]
 
 
 # ─── Three focused sub-agents ──────────────────────────────────────────

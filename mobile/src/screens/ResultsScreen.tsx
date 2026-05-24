@@ -136,7 +136,9 @@ export function ResultsScreen() {
           {/* Bottom-anchored editorial title */}
           <View style={styles.heroBottom}>
             <Text style={styles.heroKicker}>SIGNAL · {modeLabel.toUpperCase()}</Text>
-            <Text style={styles.heroObservation}>{report.observation}</Text>
+            <Text style={styles.heroObservation}>
+              {report.observation || '— Brief unavailable —'}
+            </Text>
             {report.summary ? (
               <Text style={styles.heroSummary}>{report.summary}</Text>
             ) : null}
@@ -169,12 +171,12 @@ export function ResultsScreen() {
               report.data_source === 'fallback' ? styles.dataBannerWarn : styles.dataBannerInfo,
             ]}>
               <Text style={styles.dataBannerKicker}>
-                {report.data_source === 'fallback' ? 'AI OFFLINE' : 'AI PARTIAL'}
+                {report.data_source === 'fallback' ? 'GEMINI UNREACHABLE' : 'PARTIAL READ'}
               </Text>
               <Text style={styles.dataBannerText}>
                 {report.data_source === 'fallback'
-                  ? "Gemini didn't respond on any of the brief sub-calls. The image was still read by vision, but the narrative below is generated from that vision read alone — re-run to try a live read again."
-                  : "Vision + some Gemini sub-calls came back live, others timed out and were filled in from the vision read. Re-run for the full live brief."}
+                  ? "Every Gemini sub-call failed. Empty sections below are not templated — they're genuinely missing. Re-run to get a live brief."
+                  : "Some Gemini sub-calls succeeded, others timed out. Empty sections are the failed ones — re-run for the full live brief."}
               </Text>
             </View>
           </View>

@@ -79,7 +79,9 @@ async def run(
     observation = observation or "Editorial Read"
 
     if not llm.is_available:
-        return _mock(observation, keywords)
+        raise RuntimeError(
+            "LLM unavailable for recommendation — no provider configured."
+        )
 
     facet_lines = ""
     if facets:
@@ -101,13 +103,11 @@ Write three directions. Each MUST include price_band_inr, complexity,
 and timing — they're the difference between a brief and a wish list.
 """.strip()
 
-    try:
-        data: dict[str, Any] = await llm.text_json(
-            system=SYSTEM, user_text=user_text, schema_hint=SCHEMA, temperature=0.6,
-        )
-    except Exception as e:
-        log.warning("Recommendation LLM call failed (%s: %s), using mock", type(e).__name__, e)
-        return _mock(observation, keywords)
+    # Let exceptions propagate — the pipeline / API layer turns them
+    # into a real error response. No silent mock fallback here.
+    data: dict[str, Any] = await llm.text_json(
+        system=SYSTEM, user_text=user_text, schema_hint=SCHEMA, temperature=0.6,
+    )
 
     out: list[Direction] = []
     expected = ["Safe Commercial", "Trend Forward", "Differentiated Route"]

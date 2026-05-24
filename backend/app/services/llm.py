@@ -21,9 +21,9 @@ from app.config import get_settings
 log = logging.getLogger(__name__)
 
 # Hard per-call ceiling. Tuned for Gemini Flash p95 (~6-10s) with headroom.
-LLM_CALL_TIMEOUT_S = 60.0   # vision (per image)
-LLM_TEXT_TIMEOUT_S = 90.0   # text_json — generous so Gemini actually has time
-LLM_RETRY_ATTEMPTS = 1      # one attempt; budget is large enough that retry rarely helps
+LLM_CALL_TIMEOUT_S = 120.0  # vision — generous
+LLM_TEXT_TIMEOUT_S = 120.0  # text_json — generous; no faked fallback masks failures
+LLM_RETRY_ATTEMPTS = 2      # 2 attempts; second bumps temperature slightly
 
 
 class _Backend(Protocol):
@@ -186,7 +186,24 @@ class LLMClient:
         return self._backend.is_available
 
     async def vision_json(self, **kw) -> dict[str, Any]:
-        return await asyncio.wait_for(self._backend.vision_json(**kw), timeout=LLM_CALL_TIMEOUT_S)
+        """Vision with built-in retry. No mock fallback at the caller —
+        if both attempts fail, the exception propagates so the user
+        sees a real error instead of templated text."""
+        base_temp = kw.pop("temperature", 0.2)
+        last_err: Exception | None = None
+        for attempt in range(LLM_RETRY_ATTEMPTS):
+            try:
+                return await asyncio.wait_for(
+                    self._backend.vision_json(**kw, temperature=base_temp + (0.05 * attempt)),
+                    timeout=LLM_CALL_TIMEOUT_S,
+                )
+            except Exception as e:
+                last_err = e
+                log.warning("vision_json attempt %d/%d failed (%s: %s)",
+                            attempt + 1, LLM_RETRY_ATTEMPTS, type(e).__name__, e)
+                if attempt + 1 < LLM_RETRY_ATTEMPTS:
+                    await asyncio.sleep(0.5)
+        raise last_err if last_err is not None else RuntimeError("vision_json failed")
 
     async def text_json(self, **kw) -> dict[str, Any]:
         """text_json with built-in retry. Each attempt is bounded by

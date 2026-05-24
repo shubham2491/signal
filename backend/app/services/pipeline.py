@@ -188,7 +188,23 @@ async def _build_section(reads: list[ImageRead], mode: Mode) -> dict:
         reads=reads, brands=brands, search_results=search_results, mode=mode,
     ))
 
-    commentary, directions = await asyncio.gather(commentary_task, rec_task)
+    # Gather with return_exceptions so a single failure (e.g. a slow
+    # recommendation call) doesn't abort the whole brief. The commentary
+    # already propagates per-sub-agent failures via data_source, and we
+    # return an empty directions list rather than masking with a mock.
+    commentary_res, directions_res = await asyncio.gather(
+        commentary_task, rec_task, return_exceptions=True,
+    )
+    if isinstance(commentary_res, BaseException):
+        log.error("commentary failed entirely: %s", commentary_res)
+        raise commentary_res
+    commentary = commentary_res
+    if isinstance(directions_res, BaseException):
+        log.warning("recommendation failed (%s) — directions will be empty",
+                    type(directions_res).__name__)
+        directions = []
+    else:
+        directions = directions_res
 
     # Attach a generated product image per direction. Pollinations URLs
     # are lazy (client fetches on demand) so this adds zero latency to
