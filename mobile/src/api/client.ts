@@ -36,6 +36,13 @@ export type Direction = {
   description: string;
 };
 
+export type ShotType =
+  | 'flatlay' | 'store_walk' | 'lookbook' | 'runway' | 'model_shot' | 'unknown';
+
+export type CategoryGroup =
+  | 'top' | 'bottom' | 'outerwear' | 'dress' | 'ethnic'
+  | 'footwear' | 'accessory' | 'co_ord' | 'unknown';
+
 export type ImageRead = {
   index: number;
   attributes: {
@@ -48,7 +55,21 @@ export type ImageRead = {
     aesthetic: string;
     market_segment: string;
     notes: string;
+    shot_type?: ShotType;
+    category_group?: CategoryGroup;
   };
+  keywords: string[];
+};
+
+export type GroupReport = {
+  group_id: CategoryGroup;
+  label: string;
+  image_indices: number[];
+  observation: string;
+  summary: string;
+  brand_signals: BrandSignal[];
+  commentary: string;
+  directions: Direction[];
   keywords: string[];
 };
 
@@ -64,6 +85,7 @@ export type AnalysisReport = {
   directions: Direction[];
   keywords: string[];
   reads: ImageRead[];
+  groups?: GroupReport[];
 };
 
 export type UploadImage = { uri: string; name: string; mime: string };

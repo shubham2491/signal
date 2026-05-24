@@ -101,6 +101,55 @@ export function ResultsScreen() {
           ))}
         </Card>
 
+        {/* SECTION 5: Per-category breakdown (only when multi-category upload) */}
+        {report.groups && report.groups.length > 1 ? (
+          <View style={{ marginTop: spacing.xl }}>
+            <Kicker>By Category</Kicker>
+            <Text style={styles.byCatLead}>
+              We detected {report.groups.length} categories in your upload. Each gets its own
+              brand signals and direction below.
+            </Text>
+            {report.groups.map((g) => (
+              <Card key={g.group_id + g.label} style={{ marginTop: spacing.md }}>
+                <View style={styles.groupHead}>
+                  <Text style={styles.groupLabel}>{g.label}</Text>
+                  <Text style={styles.groupCount}>
+                    {g.image_indices.length} image{g.image_indices.length === 1 ? '' : 's'}
+                  </Text>
+                </View>
+                <Text style={styles.groupObs}>{g.observation}</Text>
+                {g.summary ? <Text style={styles.groupSummary}>{g.summary}</Text> : null}
+
+                {g.brand_signals.length ? (
+                  <View style={styles.groupBrands}>
+                    {g.brand_signals.slice(0, 4).map((sig) => (
+                      <View key={sig.brand} style={styles.groupBrandRow}>
+                        <Text style={styles.groupBrandName}>{sig.brand}</Text>
+                        <SimilarityPill value={sig.similarity} />
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+                {g.commentary ? (
+                  <Text style={styles.groupCommentary}>{g.commentary}</Text>
+                ) : null}
+
+                {g.directions.length ? (
+                  <View style={styles.groupDirections}>
+                    {g.directions.map((d) => (
+                      <View key={d.label} style={styles.groupDirRow}>
+                        <Text style={styles.groupDirLabel}>{d.label.toUpperCase()}</Text>
+                        <Text style={styles.groupDirTitle}>{d.title}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+              </Card>
+            ))}
+          </View>
+        ) : null}
+
         {/* Progressive disclosure: power-user detail layer */}
         <Pressable onPress={() => setShowDetail(v => !v)} style={styles.detailToggle}>
           <Text style={styles.detailToggleText}>
@@ -302,4 +351,20 @@ const styles = StyleSheet.create({
   readRowValue: { ...type.bodySm, color: colors.text, flex: 1 },
 
   ctaRow: { flexDirection: 'row', marginTop: spacing.lg, gap: spacing.md },
+
+  // Per-category breakdown
+  byCatLead: { ...type.bodySm, color: colors.textMuted, marginTop: spacing.sm, marginBottom: spacing.sm },
+  groupHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+  groupLabel: { ...type.h2, color: colors.text },
+  groupCount: { ...type.bodySm, fontSize: 11, color: colors.textSubtle, textTransform: 'uppercase', letterSpacing: 0.6 },
+  groupObs: { ...type.h3, color: colors.text, marginTop: spacing.sm },
+  groupSummary: { ...type.bodySm, color: colors.textMuted, marginTop: spacing.xs },
+  groupBrands: { marginTop: spacing.md, gap: 6 },
+  groupBrandRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  groupBrandName: { ...type.body, color: colors.text },
+  groupCommentary: { ...type.bodySm, color: colors.text, marginTop: spacing.md, lineHeight: 22 },
+  groupDirections: { marginTop: spacing.md, gap: spacing.sm },
+  groupDirRow: { paddingTop: spacing.xs },
+  groupDirLabel: { ...type.caption, color: colors.burgundy, letterSpacing: 0.8, fontSize: 10 },
+  groupDirTitle: { ...type.bodySm, fontWeight: '600', color: colors.text, marginTop: 2 },
 });

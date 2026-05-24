@@ -23,7 +23,28 @@ Allen Solly, Snitch, AND, Biba, etc.). Be concrete and design-literate.
 Identity-blind: never describe faces, body type, race, gender expression,
 or any personal identifier. Only the garments and their construction.
 
-For each image extract DESIGN-USEFUL specifics:
+For each image extract DESIGN-USEFUL specifics PLUS two GROUPING signals
+the pipeline uses to cluster multi-image uploads:
+
+  - shot_type:      what KIND of shot this is, one of
+                    "flatlay" (product on flat surface, no model),
+                    "store_walk" (rack / shelf / store interior),
+                    "lookbook" (styled on model in editorial setting),
+                    "runway" (catwalk),
+                    "model_shot" (garment on model, plain),
+                    "unknown".
+  - category_group: which broad category this belongs to, one of
+                    "top" (tee/shirt/blouse/kurta-top),
+                    "bottom" (jeans/trousers/skirt/palazzo),
+                    "outerwear" (jacket/blazer/coat/shacket),
+                    "dress" (dress/jumpsuit/one-piece),
+                    "ethnic" (full kurta-set/lehenga/saree/indo-fusion set),
+                    "footwear",
+                    "accessory" (bag/jewellery/scarf),
+                    "co_ord" (matching top+bottom set),
+                    "unknown".
+
+And the design-specific extraction:
   - category:     the actual garment (e.g. "drop-shoulder graphic tee",
                   "co-ord set kurta-pant", "high-waist wide-leg denim").
                   Never just "top" or "shirt".
@@ -68,7 +89,9 @@ SCHEMA = """
         "trims": ["string"],
         "aesthetic": "string",
         "market_segment": "string",
-        "notes": "string"
+        "notes": "string",
+        "shot_type": "flatlay | store_walk | lookbook | runway | model_shot | unknown",
+        "category_group": "top | bottom | outerwear | dress | ethnic | footwear | accessory | co_ord | unknown"
       },
       "keywords": ["string"]
     }
@@ -113,7 +136,17 @@ async def run(images: list[bytes]) -> list[ImageRead]:
     return out
 
 
+_VALID_SHOT = {"flatlay", "store_walk", "lookbook", "runway", "model_shot", "unknown"}
+_VALID_GROUP = {"top", "bottom", "outerwear", "dress", "ethnic", "footwear", "accessory", "co_ord", "unknown"}
+
+
 def _coerce_attrs(d: dict[str, Any]) -> dict[str, Any]:
+    shot = str(d.get("shot_type", "")).strip().lower().replace("-", "_").replace(" ", "_")
+    if shot not in _VALID_SHOT:
+        shot = "unknown"
+    group = str(d.get("category_group", "")).strip().lower().replace("-", "_").replace(" ", "_")
+    if group not in _VALID_GROUP:
+        group = _guess_group_from_category(str(d.get("category", "")))
     return {
         "category": str(d.get("category", "")),
         "silhouette": str(d.get("silhouette", "")),
@@ -124,25 +157,67 @@ def _coerce_attrs(d: dict[str, Any]) -> dict[str, Any]:
         "aesthetic": str(d.get("aesthetic", "")),
         "market_segment": str(d.get("market_segment", "")),
         "notes": str(d.get("notes", "")),
+        "shot_type": shot,
+        "category_group": group,
     }
 
 
+def _guess_group_from_category(cat: str) -> str:
+    """Keyword fallback so we always have a group even if the model omits it."""
+    c = cat.lower()
+    if any(k in c for k in ("kurta-set", "lehenga", "saree", "anarkali", "sherwani", "indo-fusion set")):
+        return "ethnic"
+    if any(k in c for k in ("co-ord", "matching set", "twin set")):
+        return "co_ord"
+    if any(k in c for k in ("dress", "jumpsuit", "playsuit", "gown", "frock")):
+        return "dress"
+    if any(k in c for k in ("jacket", "blazer", "coat", "shacket", "trench", "parka", "overshirt")):
+        return "outerwear"
+    if any(k in c for k in ("jean", "trouser", "pant", "skirt", "shorts", "palazzo", "joggers", "chinos")):
+        return "bottom"
+    if any(k in c for k in ("tee", "shirt", "blouse", "top", "kurta-top", "polo", "tank", "hoodie", "sweater", "sweatshirt")):
+        return "top"
+    if any(k in c for k in ("shoe", "sneaker", "boot", "sandal", "loafer", "heel", "footwear")):
+        return "footwear"
+    if any(k in c for k in ("bag", "handbag", "tote", "purse", "wallet", "belt", "scarf", "earring", "necklace", "watch")):
+        return "accessory"
+    return "unknown"
+
+
 def _mock_reads(n: int) -> list[ImageRead]:
-    return [
-        ImageRead(
+    # Cycle through categories so multi-image demos exercise grouping.
+    presets = [
+        dict(category="drop-shoulder graphic tee", group="top",
+             aesthetic="casual youth, mid-premium",
+             keywords=["oversized", "drop-shoulder", "graphic"]),
+        dict(category="wide-leg high-waist denim", group="bottom",
+             aesthetic="contemporary denim",
+             keywords=["wide-leg", "high-waist", "indigo"]),
+        dict(category="cropped utility jacket", group="outerwear",
+             aesthetic="utility-lite",
+             keywords=["utility", "cropped", "patch-pocket"]),
+        dict(category="straight-cut kurta set", group="ethnic",
+             aesthetic="indo-fusion festive",
+             keywords=["indo-fusion", "festive", "straight-cut"]),
+    ]
+    out: list[ImageRead] = []
+    for i in range(n):
+        p = presets[i % len(presets)] if n > 1 else presets[0]
+        out.append(ImageRead(
             index=i,
             attributes=VisionAttributes(
-                category="drop-shoulder graphic tee",
+                category=p["category"],
                 silhouette="oversized boxy, hits mid-hip",
-                colors=["ecru", "rust", "off-white"],
-                fabric_guess="220gsm cotton jersey, brushed interior",
-                styling=["tucked-in front", "layered under utility shirt"],
-                trims=["ribbed neckline", "centered chest print"],
-                aesthetic="casual youth, mid-premium",
+                colors=["ecru", "rust"],
+                fabric_guess="220gsm cotton jersey",
+                styling=["tucked-in"],
+                trims=["ribbed neckline"],
+                aesthetic=p["aesthetic"],
                 market_segment="mid-premium",
                 notes="mock vision read",
+                shot_type="flatlay",
+                category_group=p["group"],
             ),
-            keywords=["oversized", "drop-shoulder", "graphic", "casual", "boxy"],
-        )
-        for i in range(n)
-    ]
+            keywords=p["keywords"],
+        ))
+    return out
