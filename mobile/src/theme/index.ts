@@ -3,18 +3,23 @@
 // muted burgundy. No SaaS blue, ever.
 
 export const colors = {
-  bg: '#FBF8F2',          // warm white
+  bg: '#F7F2E8',          // warmer cream
   surface: '#FFFFFF',
-  surfaceMuted: '#F4EFE5',
-  text: '#1F1F1D',        // charcoal
-  textMuted: '#6B6760',   // stone
+  surfaceMuted: '#EEE7D6',
+  text: '#1A1A18',        // deeper charcoal
+  textMuted: '#5F5B53',
   textSubtle: '#9A938A',
-  divider: '#E6E2D8',
-  emerald: '#1F5F4A',     // accent 1
-  emeraldSoft: '#E3EDE7',
-  burgundy: '#7A2A2A',    // accent 2
+  divider: '#E0DAC9',
+  emerald: '#0F4D3A',     // deep forest green primary
+  emeraldDeep: '#0A3A2C',
+  emeraldSoft: '#D9E5DE',
+  burgundy: '#7A2A2A',
   burgundySoft: '#F3E3E3',
-  shadow: 'rgba(31, 31, 29, 0.06)',
+  // Direction-card tints (per references)
+  safeTint: '#DDE9E0',    // pale sage
+  trendTint: '#F4D9D5',   // dusty rose
+  diffTint:  '#F1E3CD',   // warm sand
+  shadow: 'rgba(26, 26, 24, 0.08)',
 } as const;
 
 export const radii = {
@@ -35,7 +40,7 @@ export const spacing = {
 } as const;
 
 export const type = {
-  display: { fontSize: 32, lineHeight: 38, fontWeight: '700' as const, letterSpacing: -0.5 },
+  display: { fontSize: 42, lineHeight: 48, fontWeight: '700' as const, letterSpacing: -1.2 },
   h1:      { fontSize: 26, lineHeight: 32, fontWeight: '700' as const, letterSpacing: -0.3 },
   h2:      { fontSize: 20, lineHeight: 26, fontWeight: '600' as const, letterSpacing: -0.2 },
   h3:      { fontSize: 16, lineHeight: 22, fontWeight: '600' as const },

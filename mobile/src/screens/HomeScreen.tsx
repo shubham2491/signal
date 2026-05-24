@@ -1,5 +1,5 @@
-import React, { useCallback, useState } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, Image, Platform, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
@@ -11,12 +11,25 @@ import { Button } from '@/components/Button';
 import { Kicker } from '@/components/Kicker';
 import { colors, radii, spacing, type } from '@/theme';
 import type { RootStackParamList, SelectedImage } from '@/navigation';
+import { loadHistory } from '@/storage/history';
 
-type Nav = NativeStackNavigationProp<RootStackParamList, 'Home'>;
+type Nav = NativeStackNavigationProp<RootStackParamList, 'Tabs'>;
 
 export function HomeScreen() {
   const nav = useNavigation<Nav>();
   const [busy, setBusy] = useState<'camera' | 'library' | null>(null);
+  const [heroUri, setHeroUri] = useState<string | null>(null);
+
+  // Rotate hero from a recent thumbnail in history. No history = no hero
+  // (UI degrades to a tidy colored block, see styles.heroPlaceholder).
+  useEffect(() => {
+    loadHistory().then((entries) => {
+      const flat = entries.flatMap((e) => e.thumbnails).filter(Boolean);
+      if (flat.length) {
+        setHeroUri(flat[Math.floor(Math.random() * Math.min(flat.length, 8))]);
+      }
+    }).catch(() => {});
+  }, []);
 
   const pickFromLibrary = useCallback(async () => {
     setBusy('library');
@@ -64,17 +77,22 @@ export function HomeScreen() {
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar style="dark" />
 
-      <View style={styles.header}>
-        <Pressable onPress={() => nav.navigate('History')} hitSlop={12}>
-          <Text style={styles.headerLink}>History</Text>
-        </Pressable>
+      <View style={styles.hero}>
+        {heroUri ? (
+          <Image source={{ uri: heroUri }} style={styles.heroImage} resizeMode="cover" />
+        ) : (
+          <View style={styles.heroPlaceholder}>
+            <Text style={styles.heroPlaceholderText}>SIGNAL</Text>
+          </View>
+        )}
+        <View style={styles.heroOverlay} />
       </View>
 
-      <View style={styles.hero}>
-        <Kicker>Fashion Signal Agent</Kicker>
+      <View style={styles.copy}>
+        <Kicker>Fashion Intelligence</Kicker>
         <Text style={styles.brand}>SIGNAL</Text>
         <Text style={styles.tagline}>
-          Snap products. Understand what brands are doing. Decide what to design next.
+          From a single photo to a designer brief — anchored to Indian retail.
         </Text>
       </View>
 
@@ -93,17 +111,9 @@ export function HomeScreen() {
           loading={busy === 'library'}
           disabled={busy !== null && busy !== 'library'}
         />
-        {Platform.OS === 'web' ? (
-          <Text style={styles.pickerHint}>
-            Tip: hold ⌘ (Mac) or Ctrl (Win) in the file dialog to select multiple images.
-          </Text>
-        ) : null}
-      </View>
-
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>
-          Analysis focuses on apparel & design attributes, not personal identity. Images are processed
-          in memory and never stored.
+        <Text style={styles.subline}>
+          Single image · multi-image · auto-grouped by category
+          {Platform.OS === 'web' ? '  ·  hold ⌘/Ctrl in the dialog to pick many' : ''}
         </Text>
       </View>
     </SafeAreaView>
@@ -119,41 +129,58 @@ function toSelected(a: ImagePicker.ImagePickerAsset): SelectedImage {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: spacing.xl },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingTop: spacing.sm,
+  container: { flex: 1, backgroundColor: colors.bg },
+
+  hero: {
+    height: 320,
+    backgroundColor: colors.surfaceMuted,
+    borderBottomLeftRadius: radii.lg,
+    borderBottomRightRadius: radii.lg,
+    overflow: 'hidden',
   },
-  headerLink: { ...type.bodySm, color: colors.textMuted },
-  hero: { flex: 1, justifyContent: 'center' },
+  heroImage: { width: '100%', height: '100%' },
+  heroOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 77, 58, 0.05)',
+  },
+  heroPlaceholder: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surfaceMuted,
+  },
+  heroPlaceholderText: {
+    ...type.display,
+    fontSize: 64,
+    color: colors.divider,
+    letterSpacing: -2,
+  },
+
+  copy: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xl,
+  },
   brand: {
     ...type.display,
-    fontSize: 56,
-    lineHeight: 60,
     color: colors.text,
-    marginTop: spacing.md,
-    letterSpacing: -1.2,
+    marginTop: spacing.xs,
   },
   tagline: {
     ...type.body,
     color: colors.textMuted,
-    marginTop: spacing.lg,
-    maxWidth: 340,
+    marginTop: spacing.sm,
+    maxWidth: 320,
   },
-  actions: { paddingBottom: spacing.lg },
-  pickerHint: {
+
+  actions: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.xl,
+    marginTop: 'auto',
+  },
+  subline: {
     ...type.bodySm,
     fontSize: 11,
     color: colors.textSubtle,
     textAlign: 'center',
     marginTop: spacing.md,
-  },
-  footer: { paddingBottom: spacing.xl },
-  footerText: {
-    ...type.bodySm,
-    fontSize: 11,
-    color: colors.textSubtle,
-    textAlign: 'center',
   },
 });

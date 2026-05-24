@@ -28,7 +28,7 @@ export function ResultsScreen() {
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScreenHeader
         onBack={() =>
-          nav.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Home' }] }))
+          nav.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Tabs' }] }))
         }
         right={
           <Pressable onPress={() => nav.navigate('Export', { report })} hitSlop={12}>
@@ -53,26 +53,21 @@ export function ResultsScreen() {
           <Text style={styles.summary}>{report.summary}</Text>
         ) : null}
 
-        {/* SECTION 2: Brand Signals */}
-        <Card style={{ marginTop: spacing.lg }}>
+        {/* SECTION 2: Brand Signals as a 2-col card grid */}
+        <View style={{ marginTop: spacing.xl }}>
           <Kicker>Brand Signals</Kicker>
-          <View style={{ height: spacing.md }} />
-          {report.brand_signals.map((sig, i) => (
-            <View
-              key={sig.brand}
-              style={[
-                styles.brandRow,
-                i < report.brand_signals.length - 1 && styles.brandRowDivider,
-              ]}
-            >
-              <View style={styles.brandHead}>
-                <Text style={styles.brandName}>{sig.brand}</Text>
-                <SimilarityPill value={sig.similarity} />
+          <View style={styles.brandGrid}>
+            {report.brand_signals.map((sig) => (
+              <View key={sig.brand} style={styles.brandCard}>
+                <Text style={styles.brandWordmark} numberOfLines={1}>{sig.brand}</Text>
+                <View style={{ marginTop: spacing.xs }}>
+                  <SimilarityPill value={sig.similarity} />
+                </View>
+                <Text style={styles.brandCardRationale} numberOfLines={3}>{sig.rationale}</Text>
               </View>
-              <Text style={styles.brandRationale}>{sig.rationale}</Text>
-            </View>
-          ))}
-        </Card>
+            ))}
+          </View>
+        </View>
 
         {/* SECTION 3: Market Commentary */}
         {report.commentary ? (
@@ -82,24 +77,23 @@ export function ResultsScreen() {
           </Card>
         ) : null}
 
-        {/* SECTION 4: Recommended Directions */}
-        <Card style={{ marginTop: spacing.lg }}>
+        {/* SECTION 4: Recommended Directions as tinted cards */}
+        <View style={{ marginTop: spacing.xl }}>
           <Kicker>Recommended Directions</Kicker>
-          <View style={{ height: spacing.sm }} />
-          {report.directions.map((d, i) => (
-            <View
-              key={d.label}
-              style={[
-                styles.direction,
-                i < report.directions.length - 1 && styles.directionDivider,
-              ]}
-            >
-              <Text style={styles.dirLabel}>{d.label.toUpperCase()}</Text>
-              <Text style={styles.dirTitle}>{d.title}</Text>
-              <Text style={styles.dirDesc}>{d.description}</Text>
-            </View>
-          ))}
-        </Card>
+          <View style={{ height: spacing.md }} />
+          {report.directions.map((d) => {
+            const meta = DIRECTION_META[d.label] || DIRECTION_META.fallback;
+            return (
+              <View key={d.label} style={[styles.dirCard, { backgroundColor: meta.tint }]}>
+                <View style={styles.dirCardHead}>
+                  <Text style={[styles.dirCardLabel, { color: meta.color }]}>{meta.glyph}  {d.label.toUpperCase()}</Text>
+                </View>
+                <Text style={styles.dirCardTitle}>{d.title}</Text>
+                <Text style={styles.dirCardDesc}>{d.description}</Text>
+              </View>
+            );
+          })}
+        </View>
 
         {/* SECTION 5: Per-category breakdown (only when multi-category upload) */}
         {report.groups && report.groups.length > 1 ? (
@@ -261,6 +255,13 @@ export function ResultsScreen() {
   );
 }
 
+const DIRECTION_META: Record<string, { tint: string; color: string; glyph: string }> = {
+  'Safe Commercial':     { tint: colors.safeTint,  color: colors.emerald, glyph: '◆' },
+  'Trend Forward':       { tint: colors.trendTint, color: colors.burgundy, glyph: '↗' },
+  'Differentiated Route':{ tint: colors.diffTint,  color: colors.text,    glyph: '★' },
+  fallback:              { tint: colors.surfaceMuted, color: colors.text, glyph: '◆' },
+};
+
 function ReadRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.readRow}>
@@ -280,19 +281,48 @@ const styles = StyleSheet.create({
   observation: { ...type.h1, color: colors.text, marginTop: spacing.xs },
   summary: { ...type.body, color: colors.textMuted, marginBottom: spacing.sm },
 
-  brandRow: { paddingVertical: spacing.md },
-  brandRowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider },
-  brandHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  brandName: { ...type.h3, color: colors.text },
-  brandRationale: { ...type.bodySm, color: colors.textMuted, marginTop: spacing.xs },
+  // Brand grid
+  brandGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    marginTop: spacing.md,
+  },
+  brandCard: {
+    width: '47%',
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.divider,
+    minHeight: 132,
+  },
+  brandWordmark: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+    letterSpacing: -0.4,
+  },
+  brandCardRationale: {
+    ...type.bodySm,
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: spacing.sm,
+    lineHeight: 17,
+  },
 
   commentary: { ...type.body, color: colors.text, marginTop: spacing.sm, lineHeight: 24 },
 
-  direction: { paddingVertical: spacing.md },
-  directionDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider },
-  dirLabel: { ...type.caption, color: colors.burgundy, letterSpacing: 1 },
-  dirTitle: { ...type.h2, color: colors.text, marginTop: spacing.xs },
-  dirDesc: { ...type.body, color: colors.textMuted, marginTop: spacing.xs },
+  // Tinted direction cards
+  dirCard: {
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  dirCardHead: { flexDirection: 'row', alignItems: 'center' },
+  dirCardLabel: { ...type.caption, letterSpacing: 1.2 },
+  dirCardTitle: { ...type.h2, color: colors.text, marginTop: spacing.xs },
+  dirCardDesc: { ...type.body, color: colors.text, marginTop: spacing.xs, opacity: 0.85 },
 
   detailToggle: { alignSelf: 'center', paddingVertical: spacing.lg },
   detailToggleText: { ...type.bodySm, color: colors.emerald, textDecorationLine: 'underline' },

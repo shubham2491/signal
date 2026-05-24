@@ -12,7 +12,9 @@ import { colors, radii, spacing, type } from '@/theme';
 import { clearHistory, groupByDay, loadHistory, removeEntry, type HistoryEntry } from '@/storage/history';
 import type { RootStackParamList } from '@/navigation';
 
-type Nav = NativeStackNavigationProp<RootStackParamList, 'History'>;
+// History sits in the Tab navigator but pushes Results, which lives in the
+// root stack — so we just type against the root stack for navigation calls.
+type Nav = NativeStackNavigationProp<RootStackParamList, 'Results'>;
 
 type Section = { label: string; items: HistoryEntry[] };
 
@@ -35,7 +37,6 @@ export function HistoryScreen() {
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScreenHeader
         title="History"
-        onBack={() => nav.goBack()}
         right={
           isEmpty ? null : (
             <Pressable
