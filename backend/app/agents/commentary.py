@@ -25,6 +25,7 @@ shelf", "the metro fast-fashion floor" instead.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -162,6 +163,18 @@ async def run(
     search_results: dict[str, list[dict]],
     mode: Mode,
 ) -> dict[str, Any]:
+    """Run the commentary chain. Splits the previous monolithic call into
+    THREE parallel focused agents so each LLM request is small, fast and
+    reliable. Each agent has its own retry inside the LLM client.
+
+    A. editorial_agent  — observation, summary, brand_signals, commentary, keywords, palette
+    B. translation_agent — consumer, why_now, india_play
+    C. ops_agent        — price_strategy + price_*, production_notes, merchandising
+
+    If a single agent fails, ONLY that subsection falls back. The others
+    still show live LLM output. data_source becomes 'live' (all three
+    succeeded), 'partial' (some succeeded, some fell back), or
+    'fallback' (Gemini not configured at all)."""
     llm = get_llm()
     pooled = _pool(reads)
     brand_block = _brand_block(brands, search_results)
@@ -171,59 +184,277 @@ async def run(
         out["data_source"] = "fallback"
         return out
 
-    user_text = f"""
+    # Fire all three agents in parallel; each retries internally.
+    ed_task = _editorial_agent(llm, pooled, brand_block, brands, mode, reads)
+    tr_task = _translation_agent(llm, pooled, mode)
+    ops_task = _ops_agent(llm, pooled, brands, mode)
+    ed_res, tr_res, ops_res = await asyncio.gather(
+        ed_task, tr_task, ops_task, return_exceptions=True,
+    )
+
+    mock = _mock_commentary(brands, pooled)
+    out: dict[str, Any] = {}
+    statuses: list[str] = []
+
+    # Editorial: observation, summary, brand_signals, commentary, keywords, palette
+    if isinstance(ed_res, dict):
+        out.update({
+            "observation": ed_res.get("observation") or mock["observation"],
+            "summary":     ed_res.get("summary") or mock["summary"],
+            "commentary":  ed_res.get("commentary") or mock["commentary"],
+            "keywords":    ed_res.get("keywords") or mock["keywords"],
+            "palette":     ed_res.get("palette") or mock["palette"],
+            "brand_signals": ed_res.get("brand_signals") or mock["brand_signals"],
+        })
+        statuses.append("editorial:live")
+    else:
+        log.warning("editorial_agent failed (%s): %s", type(ed_res).__name__, ed_res)
+        for k in ("observation", "summary", "commentary", "keywords", "palette", "brand_signals"):
+            out[k] = mock[k]
+        statuses.append("editorial:fallback")
+
+    # Translation: consumer, why_now, india_play
+    if isinstance(tr_res, dict):
+        out["consumer"]   = tr_res.get("consumer") or mock["consumer"]
+        out["why_now"]    = tr_res.get("why_now") or mock["why_now"]
+        out["india_play"] = tr_res.get("india_play") or mock["india_play"]
+        statuses.append("translation:live")
+    else:
+        log.warning("translation_agent failed (%s): %s", type(tr_res).__name__, tr_res)
+        out["consumer"]   = mock["consumer"]
+        out["why_now"]    = mock["why_now"]
+        out["india_play"] = mock["india_play"]
+        statuses.append("translation:fallback")
+
+    # Ops: price ladder, production, merchandising
+    if isinstance(ops_res, dict):
+        out["price_strategy"]    = ops_res.get("price_strategy") or mock["price_strategy"]
+        out["price_anchor_inr"]  = ops_res.get("price_anchor_inr") or mock["price_anchor_inr"]
+        out["price_floor_inr"]   = ops_res.get("price_floor_inr") or mock["price_floor_inr"]
+        out["price_target_inr"]  = ops_res.get("price_target_inr") or mock["price_target_inr"]
+        out["production_notes"]  = ops_res.get("production_notes") or mock["production_notes"]
+        out["merchandising"]     = ops_res.get("merchandising") or mock["merchandising"]
+        statuses.append("ops:live")
+    else:
+        log.warning("ops_agent failed (%s): %s", type(ops_res).__name__, ops_res)
+        for k in ("price_strategy", "price_anchor_inr", "price_floor_inr",
+                  "price_target_inr", "production_notes", "merchandising"):
+            out[k] = mock[k]
+        statuses.append("ops:fallback")
+
+    # Scrub Indian retailer name leaks from every narrative field, regardless of source.
+    for k in ("commentary", "consumer", "why_now", "india_play",
+              "price_strategy", "production_notes", "merchandising"):
+        out[k] = _scrub_narrative(out.get(k, ""))
+
+    live_count = sum(1 for s in statuses if s.endswith("live"))
+    if live_count == len(statuses):
+        out["data_source"] = "live"
+    elif live_count == 0:
+        out["data_source"] = "fallback"
+    else:
+        out["data_source"] = "partial"
+    log.info("commentary statuses: %s → data_source=%s", statuses, out["data_source"])
+    return out
+
+
+# ─── Three focused sub-agents ──────────────────────────────────────────
+
+_EDITORIAL_SYSTEM = """You are SIGNAL's Editorial Agent. The reader is
+an Indian fast-fashion designer at the value-to-mid floor. Translate
+the international aspirational read into a tight editorial headline +
+short market-context paragraph + brand-similarity scorecard.
+
+STRICT: brand_signals reference ONLY the supplied international brands.
+The 'commentary' field must NEVER name an Indian retailer (no Zudio,
+Westside, Pantaloons, Snitch, Wrogn, Allen Solly, AND, Biba, FabIndia,
+Nicobar, etc.) — refer to that tier as "the Indian value floor" or
+"the metro aspirational-mass shelf".
+
+palette: 4-6 specific named trade colors (ecru, rust, kerala green,
+burnt sienna — never "light"/"dark"/"blue").
+""".strip()
+
+_EDITORIAL_SCHEMA = """
+{
+  "observation": "string (3-7 words, editorial headline)",
+  "summary": "string (one sentence <= 24 words)",
+  "brand_signals": [
+    {"brand": "<name from candidates>", "similarity": "Strong|Adjacent|Moderate|Weak",
+     "rationale": "string (<= 22 words)", "citations": ["url"]}
+  ],
+  "commentary": "string (3-5 sentences, market WHY, no Indian retailer names)",
+  "palette": ["string"],
+  "keywords": ["string"]
+}
+""".strip()
+
+_TRANSLATION_SYSTEM = """You are SIGNAL's Translation Agent. The reader
+is an Indian fast-fashion designer translating an international
+aspirational look into an India launch. Produce three short
+India-context sections:
+
+  consumer  — 2-3 sentences naming WHO buys this (age band, city tier,
+              household income proxy, media diet) and WHEN they wear it
+              (occasion). NO retailer names.
+  why_now   — 1-2 sentences on why this signal lands in India in this
+              specific window. Tie to monsoon / festive / wedding /
+              post-EOSS / back-to-office cycles. NO retailer names.
+  india_play — 2-3 sentences on HOW to launch. Distribution (tier-1
+              metros vs pan-India vs digital-first), drop timing (week
+              of year or season), format (capsule / hero SKU / 3-color
+              stack / limited drop). Use generic descriptors like
+              "metro stores", "value floor", "aspirational-mass shelf"
+              — NEVER name an Indian retailer.
+
+Be specific. Use Indian retail vocabulary.
+""".strip()
+
+_TRANSLATION_SCHEMA = """
+{
+  "consumer": "string",
+  "why_now": "string",
+  "india_play": "string"
+}
+""".strip()
+
+_OPS_SYSTEM = """You are SIGNAL's Operations Agent. The reader is an
+Indian fast-fashion designer. Produce the INR price ladder + production
+spec + merchandising note.
+
+STRICT: never name an Indian retailer in narrative — say "the value
+floor" or "the aspirational-mass shelf". The aspirational anchor IS
+named (one of the supplied international brands).
+
+price_anchor_inr — short label, format "BRAND INR X,XXX" (e.g. "Zara INR 2,990").
+price_floor_inr  — short label, format "INR XXX-YYY" (no brand name).
+price_target_inr — short label, format "INR XXX-YYY".
+price_strategy   — 2-3 sentences explaining the ladder + margin / share logic.
+
+production_notes — 1-2 sentences: fabric (gsm + weave), complexity
+                   (easy/medium/hard at scale), 1-2 critical trim callouts.
+merchandising    — 1-2 sentences: adjacent SKUs + shelf-stack note.
+""".strip()
+
+_OPS_SCHEMA = """
+{
+  "price_strategy": "string",
+  "price_anchor_inr": "string",
+  "price_floor_inr": "string",
+  "price_target_inr": "string",
+  "production_notes": "string",
+  "merchandising": "string"
+}
+""".strip()
+
+
+def _facets_block(pooled: dict[str, list[str]]) -> str:
+    return (
+        f"  aesthetics:  {', '.join(pooled['aesthetics']) or '—'}\n"
+        f"  categories:  {', '.join(pooled['categories']) or '—'}\n"
+        f"  colors:      {', '.join(pooled['colors']) or '—'}\n"
+        f"  silhouettes: {', '.join(pooled['silhouettes']) or '—'}\n"
+        f"  market:      {', '.join(pooled['segments']) or '—'}\n"
+        f"  keywords:    {', '.join(pooled['keywords']) or '—'}"
+    )
+
+
+async def _editorial_agent(llm, pooled, brand_block, brands, mode, reads) -> dict[str, Any]:
+    user = f"""
 Mode: {mode}
 Image count: {len(reads)}
 
-Vision facets (pooled across images):
-  aesthetics:  {", ".join(pooled["aesthetics"]) or "—"}
-  categories:  {", ".join(pooled["categories"]) or "—"}
-  colors:      {", ".join(pooled["colors"]) or "—"}
-  silhouettes: {", ".join(pooled["silhouettes"]) or "—"}
-  market:      {", ".join(pooled["segments"]) or "—"}
-  keywords:    {", ".join(pooled["keywords"]) or "—"}
+Vision facets:
+{_facets_block(pooled)}
 
-Candidate INTERNATIONAL aspirational brands (cite URLs where you use them):
+Candidate international brands (cite URLs you use):
 
 {brand_block}
-
-Write the full brief. Every narrative section must be specific and
-designer-usable. Remember: brand_signals = international only;
-narrative sections NEVER name an Indian retailer.
 """.strip()
+    raw = await llm.text_json(
+        system=_EDITORIAL_SYSTEM, user_text=user,
+        schema_hint=_EDITORIAL_SCHEMA, temperature=0.25,
+    )
+    # Normalize brand_signals.
+    allowed = {b.name for b in brands}
+    sigs_raw = raw.get("brand_signals") or []
+    sigs: list[BrandSignal] = []
+    seen: set[str] = set()
+    for s in sigs_raw:
+        name = str(s.get("brand", "")).strip()
+        if name not in allowed or name in seen:
+            continue
+        seen.add(name)
+        sim = str(s.get("similarity", "Moderate")).strip().title()
+        if sim not in ("Strong", "Adjacent", "Moderate", "Weak"):
+            sim = "Moderate"
+        sigs.append(BrandSignal(
+            brand=name, similarity=sim,  # type: ignore[arg-type]
+            rationale=str(s.get("rationale", ""))[:240],
+            citations=[c for c in (s.get("citations") or []) if isinstance(c, str)][:3],
+        ))
+    for b in brands:
+        if b.name not in seen:
+            sigs.append(BrandSignal(
+                brand=b.name, similarity="Weak",
+                rationale=f"Limited overlap with {b.name}'s current floor set.",
+                citations=[],
+            ))
+    return {
+        "observation":  str(raw.get("observation", "")).strip(),
+        "summary":      str(raw.get("summary", "")).strip(),
+        "commentary":   str(raw.get("commentary", "")).strip(),
+        "palette":      [str(c) for c in (raw.get("palette") or [])][:8],
+        "keywords":     [str(k) for k in (raw.get("keywords") or [])][:10],
+        "brand_signals": [s.model_dump() for s in sigs],
+    }
 
-    try:
-        data = await llm.text_json(system=SYSTEM, user_text=user_text, schema_hint=SCHEMA)
-    except Exception as e:
-        log.warning("Commentary LLM call failed (%s: %s), falling back to dynamic mock", type(e).__name__, e)
-        out = _mock_commentary(brands, pooled)
-        out["data_source"] = "fallback"
-        return out
 
-    # Track partial-output state: if more than half of the narrative fields are
-    # empty after parsing, the LLM probably got truncated. We still ship what
-    # we have but flag it so the UI can show a 'partial read' notice and we
-    # avoid backfilling everything with stale mock copy.
-    narrative_fields = ("commentary", "consumer", "why_now", "india_play",
-                        "price_strategy", "production_notes", "merchandising")
-    empty_count = sum(1 for k in narrative_fields if not str(data.get(k, "")).strip())
-    sanitized = _sanitize(data, brands, pooled)
-    if empty_count >= len(narrative_fields) // 2:
-        log.warning("Commentary partial (%d/%d narrative fields empty) — backfilling with dynamic mock",
-                    empty_count, len(narrative_fields))
-        # Backfill only the empty narrative fields with dynamic mock content.
-        mock = _mock_commentary(brands, pooled)
-        for k in narrative_fields:
-            if not sanitized.get(k):
-                sanitized[k] = mock[k]
-        # Also backfill the structured price fields if missing.
-        for k in ("price_anchor_inr", "price_floor_inr", "price_target_inr"):
-            if not sanitized.get(k):
-                sanitized[k] = mock[k]
-        sanitized["data_source"] = "partial"
-    else:
-        sanitized["data_source"] = "live"
-    return sanitized
+async def _translation_agent(llm, pooled, mode) -> dict[str, Any]:
+    user = f"""
+Mode: {mode}
+
+Vision facets:
+{_facets_block(pooled)}
+
+Write the three India-translation sections.
+""".strip()
+    raw = await llm.text_json(
+        system=_TRANSLATION_SYSTEM, user_text=user,
+        schema_hint=_TRANSLATION_SCHEMA, temperature=0.35,
+    )
+    return {
+        "consumer":   str(raw.get("consumer", "")).strip(),
+        "why_now":    str(raw.get("why_now", "")).strip(),
+        "india_play": str(raw.get("india_play", "")).strip(),
+    }
+
+
+async def _ops_agent(llm, pooled, brands, mode) -> dict[str, Any]:
+    anchor = next((b for b in brands if b.segment == "global_aspirational"), brands[0] if brands else None)
+    anchor_name = anchor.name if anchor else "Zara"
+    user = f"""
+Mode: {mode}
+
+Vision facets:
+{_facets_block(pooled)}
+
+Aspirational anchor brand (use this exact name in price_anchor_inr): {anchor_name}
+
+Write the price ladder + production + merchandising sections.
+""".strip()
+    raw = await llm.text_json(
+        system=_OPS_SYSTEM, user_text=user,
+        schema_hint=_OPS_SCHEMA, temperature=0.3,
+    )
+    return {
+        "price_strategy":   str(raw.get("price_strategy", "")).strip(),
+        "price_anchor_inr": str(raw.get("price_anchor_inr", "")).strip()[:60],
+        "price_floor_inr":  str(raw.get("price_floor_inr", "")).strip()[:60],
+        "price_target_inr": str(raw.get("price_target_inr", "")).strip()[:60],
+        "production_notes": str(raw.get("production_notes", "")).strip(),
+        "merchandising":    str(raw.get("merchandising", "")).strip(),
+    }
 
 
 def _pool(reads: list[ImageRead]) -> dict[str, list[str]]:

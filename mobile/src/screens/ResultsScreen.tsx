@@ -169,12 +169,12 @@ export function ResultsScreen() {
               report.data_source === 'fallback' ? styles.dataBannerWarn : styles.dataBannerInfo,
             ]}>
               <Text style={styles.dataBannerKicker}>
-                {report.data_source === 'fallback' ? 'OFFLINE BRIEF' : 'PARTIAL READ'}
+                {report.data_source === 'fallback' ? 'AI OFFLINE' : 'AI PARTIAL'}
               </Text>
               <Text style={styles.dataBannerText}>
                 {report.data_source === 'fallback'
-                  ? "The AI commentary service didn't respond — this brief is generated from the vision read alone. Sections will be less specific than a live read."
-                  : "The AI read returned partial commentary; missing sections were backfilled from the vision read. Re-run for the full take."}
+                  ? "Gemini didn't respond on any of the brief sub-calls. The image was still read by vision, but the narrative below is generated from that vision read alone — re-run to try a live read again."
+                  : "Vision + some Gemini sub-calls came back live, others timed out and were filled in from the vision read. Re-run for the full live brief."}
               </Text>
             </View>
           </View>

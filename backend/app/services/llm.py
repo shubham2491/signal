@@ -22,7 +22,8 @@ log = logging.getLogger(__name__)
 
 # Hard per-call ceiling. Tuned for Gemini Flash p95 (~6-10s) with headroom.
 LLM_CALL_TIMEOUT_S = 25.0
-LLM_TEXT_TIMEOUT_S = 70.0  # text_json runs the heavy multi-field commentary call
+LLM_TEXT_TIMEOUT_S = 45.0  # text_json calls — keep tight so retry kicks in fast
+LLM_RETRY_ATTEMPTS = 2     # initial + 1 retry; second attempt bumps temperature
 
 
 class _Backend(Protocol):
@@ -188,7 +189,27 @@ class LLMClient:
         return await asyncio.wait_for(self._backend.vision_json(**kw), timeout=LLM_CALL_TIMEOUT_S)
 
     async def text_json(self, **kw) -> dict[str, Any]:
-        return await asyncio.wait_for(self._backend.text_json(**kw), timeout=LLM_TEXT_TIMEOUT_S)
+        """text_json with built-in retry. Each attempt is bounded by
+        LLM_TEXT_TIMEOUT_S; on failure we bump temperature slightly and
+        try again. Surfaces the final exception so the caller can route
+        to a focused fallback."""
+        base_temp = kw.pop("temperature", 0.3)
+        last_err: Exception | None = None
+        for attempt in range(LLM_RETRY_ATTEMPTS):
+            temp = base_temp + (0.1 * attempt)
+            try:
+                return await asyncio.wait_for(
+                    self._backend.text_json(**kw, temperature=temp),
+                    timeout=LLM_TEXT_TIMEOUT_S,
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                last_err = e
+                log.warning("text_json attempt %d/%d failed (%s: %s)",
+                            attempt + 1, LLM_RETRY_ATTEMPTS, type(e).__name__, e)
+                if attempt + 1 < LLM_RETRY_ATTEMPTS:
+                    await asyncio.sleep(0.4)  # tiny backoff
+        # All attempts exhausted — re-raise so the caller decides what to do.
+        raise last_err if last_err is not None else RuntimeError("text_json failed")
 
 
 def _parse_json(raw: str) -> dict[str, Any]:
