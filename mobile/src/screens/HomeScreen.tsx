@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
@@ -93,6 +93,11 @@ export function HomeScreen() {
           loading={busy === 'library'}
           disabled={busy !== null && busy !== 'library'}
         />
+        {Platform.OS === 'web' ? (
+          <Text style={styles.pickerHint}>
+            Tip: hold ⌘ (Mac) or Ctrl (Win) in the file dialog to select multiple images.
+          </Text>
+        ) : null}
       </View>
 
       <View style={styles.footer}>
@@ -137,6 +142,13 @@ const styles = StyleSheet.create({
     maxWidth: 340,
   },
   actions: { paddingBottom: spacing.lg },
+  pickerHint: {
+    ...type.bodySm,
+    fontSize: 11,
+    color: colors.textSubtle,
+    textAlign: 'center',
+    marginTop: spacing.md,
+  },
   footer: { paddingBottom: spacing.xl },
   footerText: {
     ...type.bodySm,

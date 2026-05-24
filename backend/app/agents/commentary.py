@@ -19,11 +19,20 @@ from app.services.llm import get_llm
 log = logging.getLogger(__name__)
 
 
-SYSTEM = """You are SIGNAL's Commentary Agent.
+SYSTEM = """You are SIGNAL's Commentary Agent, writing for designers and
+buyers at Indian value and mid-premium retail (Zudio, Westside,
+Pantaloons, Max, Allen Solly, AND, Biba, Snitch, Rare Rabbit, etc.).
 
-You write for fashion designers who scan briefs in <30 seconds. Be editorial,
-not analytical. No SaaS jargon, no bullet-point essays, no buzzwords. Be
-specific about silhouette, palette, and fabric where the inputs allow it.
+ANCHOR YOUR BRIEF TO THE INDIAN MARKET. Compare against Indian floor
+sets only — never reach for luxury or aspirational European houses
+(Prada, Loewe, Balenciaga, Jacquemus, etc.). Those references are not
+useful to this audience. If you need a global comparator, use brands
+with strong India presence (Zara India, H&M India, Uniqlo India).
+
+Be editorial, not analytical. No SaaS jargon, no bullet-point essays.
+Reference India-specific context where relevant: tier-1 vs tier-2/3
+city floor sets, festive/ethnic occasion-wear cycles, summer-weight
+fabrics, INR price-bands, regional palette preferences.
 
 Always identity-blind: never reference faces, body, or personal identity.
 """.strip()
@@ -72,15 +81,17 @@ Vision facets (pooled across images):
   market:     {", ".join(pooled["segments"]) or "—"}
   keywords:   {", ".join(pooled["keywords"]) or "—"}
 
-Candidate brands with recent retailer snippets (use these to ground
-similarity calls; cite URLs you use):
+Candidate Indian-retail brands with recent snippets (cite URLs you use):
 
 {brand_block}
 
-Write the brief. Brand signals must cover ALL candidate brands. Strong = the
-input could plausibly be from that brand right now. Adjacent = a different
-positioning but same direction. Moderate = some shared facets. Weak = mostly
-divergent. Keep it crisp.
+Write the brief, anchored to Indian value and mid-premium retail.
+Brand signals must cover ALL candidate brands. Strong = the input could
+plausibly be from that brand's current Indian floor. Adjacent = different
+positioning but same direction. Moderate = some shared facets. Weak =
+mostly divergent. Commentary should reference Indian tier-1 vs tier-2/3
+dynamics, festive/seasonal cycles, or INR price-band positioning where
+the facets allow it. Keep it crisp.
 """.strip()
 
     try:
@@ -177,24 +188,25 @@ def _sanitize(data: dict[str, Any], brands: list[Brand]) -> dict[str, Any]:
 
 
 def _mock_commentary(brands: list[Brand], pooled: dict[str, list[str]]) -> dict[str, Any]:
-    obs = " ".join(pooled["aesthetics"][:2] + pooled["categories"][:1]).title() or "Quiet Minimal Casualwear"
+    obs = " ".join(pooled["aesthetics"][:2] + pooled["categories"][:1]).title() or "Casual Mid-Premium Read"
     sigs = []
-    aesthetic_phrase = pooled["aesthetics"][0] if pooled["aesthetics"] else "minimal"
+    aesthetic_phrase = pooled["aesthetics"][0] if pooled["aesthetics"] else "casual"
     for i, b in enumerate(brands):
         sim = ["Strong", "Adjacent", "Moderate", "Moderate", "Weak"][min(i, 4)]
         sigs.append(BrandSignal(
             brand=b.name, similarity=sim,  # type: ignore[arg-type]
-            rationale=f"{b.name} runs similar {aesthetic_phrase} silhouettes on its current floor.",
+            rationale=f"{b.name} runs similar {aesthetic_phrase} silhouettes on its current India floor.",
             citations=[],
         ).model_dump())
     return {
         "observation": obs,
-        "summary": "Heavyweight cotton, boxy silhouettes, restrained palette — quiet luxury read.",
+        "summary": "Oversized cotton silhouettes in a muted palette — mid-premium casualwear read.",
         "brand_signals": sigs,
         "commentary": (
-            "The pieces lean into the quiet-luxury direction that has dominated "
-            "spring 2025 floor sets. Strong overlap with Massimo Dutti and COS; "
-            "Zara remains the volume play."
+            "Reads as mid-premium casualwear — sits comfortably between Zudio's "
+            "fast-trend floor and Snitch/Wrogn's premium-youth positioning. "
+            "Tier-1 metro core, with strong potential carry-over to tier-2 cities "
+            "in the next refresh cycle. INR 999-1,799 sweet spot."
         ),
-        "keywords": pooled["keywords"][:8] or ["oversized", "neutral", "minimal", "boxy"],
+        "keywords": pooled["keywords"][:8] or ["oversized", "neutral", "casual", "drop-shoulder"],
     }

@@ -14,11 +14,20 @@ from app.services.llm import get_llm
 log = logging.getLogger(__name__)
 
 
-SYSTEM = """You are SIGNAL's Recommendation Agent for fashion designers.
+SYSTEM = """You are SIGNAL's Recommendation Agent for Indian fashion
+designers and buyers (value and mid-premium retail — Zudio, Westside,
+Pantaloons, Allen Solly, AND, Snitch, Biba, Wrogn, etc.).
 
-Given an observation and commentary, propose three design directions. Each
-direction is a tight, opinionated brief a designer could hand to a sampling
-team. Concrete fabric / silhouette / palette beats abstract trend talk.
+Given an observation and commentary, propose three design directions
+for the Indian floor set. Each direction is a tight, opinionated brief
+a designer could hand to a sampling team — concrete fabric / silhouette
+/ palette / INR price-band beats abstract trend talk.
+
+Reference Indian realities where relevant: summer-weight fabrics,
+festive/wedding occasion windows, tier-1 vs tier-2/3 distribution,
+ethnic/indo-fusion crossover potential, INR 499-1,999 (value) vs
+INR 1,999-4,999 (mid-premium) price thinking. Never anchor to European
+luxury houses.
 
 Labels are fixed: 'Safe Commercial', 'Trend Forward', 'Differentiated Route'.
 """.strip()
@@ -74,17 +83,17 @@ def _mock(observation: str, keywords: list[str]) -> list[Direction]:
         Direction(
             label="Safe Commercial",
             title=f"Hero {observation}",
-            description=f"Run a tight capsule of {kw} pieces at a high-street price point. Stick to proven silhouettes — this is volume, not noise.",
+            description=f"Run a tight capsule of {kw} pieces at INR 799-1,299. Volume play for tier-1 metros — Zudio / Pantaloons positioning. Stick to proven silhouettes; this is shelf-velocity, not noise.",
         ),
         Direction(
             label="Trend Forward",
             title="Push the proportion",
-            description="Take the same direction and exaggerate one variable — sleeve length, drop shoulder, or hem treatment. Limited drops, premium fabric.",
+            description="Take the same direction and exaggerate one variable — sleeve length, drop shoulder, or hem treatment. Limited drops at INR 1,799-2,499, Snitch / Wrogn / Westside price-band. Tier-1 first, watch sell-through before tier-2 push.",
         ),
         Direction(
             label="Differentiated Route",
-            title="Craft + earthtone story",
-            description="Lean into texture-led knits, hand-feel finishes, undyed naturals. Sells the brand story; lower velocity, higher margin.",
+            title="Indo-fusion craft story",
+            description="Lean into handloom textures, hand-block prints, or sustainable cotton — Nicobar / FabIndia adjacency. Higher margin, lower velocity. Festive window timing maximises pull.",
         ),
     ]
 

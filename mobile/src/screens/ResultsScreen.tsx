@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, CommonActions } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -110,24 +110,90 @@ export function ResultsScreen() {
 
         {showDetail ? (
           <Card flat style={[styles.detailCard, { marginBottom: spacing.xl }]}>
-            <Kicker>Keywords</Kicker>
-            <Text style={styles.kwLine}>{report.keywords.join('  ·  ')}</Text>
+            {/* Detection meta */}
+            <Kicker>Detection</Kicker>
+            <Text style={styles.metaLine}>
+              {modeLabel} · confidence {(report.mode_confidence * 100).toFixed(0)}%
+              {'  ·  '}
+              {report.image_count} image{report.image_count === 1 ? '' : 's'}
+            </Text>
+
+            {report.keywords.length ? (
+              <>
+                <View style={{ height: spacing.lg }} />
+                <Kicker>Keywords ({report.keywords.length})</Kicker>
+                <View style={styles.chipRow}>
+                  {report.keywords.map((k) => (
+                    <View key={k} style={styles.chip}>
+                      <Text style={styles.chipText}>{k}</Text>
+                    </View>
+                  ))}
+                </View>
+              </>
+            ) : null}
+
+            {/* Per-brand citations */}
+            {report.brand_signals.some(s => s.citations.length) ? (
+              <>
+                <View style={{ height: spacing.lg }} />
+                <Kicker>Brand Citations</Kicker>
+                {report.brand_signals.filter(s => s.citations.length).map((s) => (
+                  <View key={s.brand} style={styles.citeBlock}>
+                    <Text style={styles.citeBrand}>{s.brand}</Text>
+                    {s.citations.map((url, idx) => (
+                      <Pressable key={url + idx} onPress={() => Linking.openURL(url).catch(() => {})}>
+                        <Text style={styles.citeLink} numberOfLines={1}>
+                          {url.replace(/^https?:\/\//, '')}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ))}
+              </>
+            ) : null}
+
+            {/* Per-image full reads */}
             <View style={{ height: spacing.lg }} />
-            <Kicker>Per-Image Reads</Kicker>
+            <Kicker>Per-Image Reads ({report.reads.length})</Kicker>
             {report.reads.map((r) => (
               <View key={r.index} style={styles.readBlock}>
                 <Text style={styles.readHead}>
                   Image {r.index + 1} — {r.attributes.category || 'apparel'}
                 </Text>
-                <Text style={styles.readMeta}>
-                  {[r.attributes.silhouette, r.attributes.aesthetic, r.attributes.market_segment]
-                    .filter(Boolean).join(' · ')}
-                </Text>
-                {r.attributes.colors.length ? (
-                  <Text style={styles.readMeta}>Colors: {r.attributes.colors.join(', ')}</Text>
+
+                {r.attributes.silhouette ? (
+                  <ReadRow label="Silhouette" value={r.attributes.silhouette} />
                 ) : null}
                 {r.attributes.fabric_guess ? (
-                  <Text style={styles.readMeta}>Fabric: {r.attributes.fabric_guess}</Text>
+                  <ReadRow label="Fabric" value={r.attributes.fabric_guess} />
+                ) : null}
+                {r.attributes.colors.length ? (
+                  <ReadRow label="Colors" value={r.attributes.colors.join(', ')} />
+                ) : null}
+                {r.attributes.styling.length ? (
+                  <ReadRow label="Styling" value={r.attributes.styling.join(', ')} />
+                ) : null}
+                {r.attributes.trims.length ? (
+                  <ReadRow label="Trims" value={r.attributes.trims.join(', ')} />
+                ) : null}
+                {r.attributes.aesthetic ? (
+                  <ReadRow label="Aesthetic" value={r.attributes.aesthetic} />
+                ) : null}
+                {r.attributes.market_segment ? (
+                  <ReadRow label="Tier" value={r.attributes.market_segment} />
+                ) : null}
+                {r.attributes.notes ? (
+                  <ReadRow label="Notes" value={r.attributes.notes} />
+                ) : null}
+
+                {r.keywords.length ? (
+                  <View style={styles.miniChipRow}>
+                    {r.keywords.map((k) => (
+                      <View key={k} style={styles.miniChip}>
+                        <Text style={styles.miniChipText}>{k}</Text>
+                      </View>
+                    ))}
+                  </View>
                 ) : null}
               </View>
             ))}
@@ -143,6 +209,15 @@ export function ResultsScreen() {
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function ReadRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.readRow}>
+      <Text style={styles.readRowLabel}>{label}</Text>
+      <Text style={styles.readRowValue}>{value}</Text>
+    </View>
   );
 }
 
@@ -179,10 +254,52 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   kwLine: { ...type.bodySm, color: colors.text, marginTop: spacing.xs },
+  metaLine: { ...type.bodySm, color: colors.text, marginTop: spacing.xs },
 
-  readBlock: { paddingVertical: spacing.sm },
-  readHead: { ...type.h3, color: colors.text },
-  readMeta: { ...type.bodySm, color: colors.textMuted, marginTop: 2 },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: spacing.sm,
+  },
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: colors.bg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.divider,
+  },
+  chipText: { ...type.bodySm, fontSize: 11, color: colors.text },
+
+  miniChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: spacing.sm,
+  },
+  miniChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: colors.bg,
+  },
+  miniChipText: { ...type.bodySm, fontSize: 10, color: colors.textMuted },
+
+  citeBlock: { marginTop: spacing.sm },
+  citeBrand: { ...type.bodySm, fontWeight: '600', color: colors.text },
+  citeLink: { ...type.bodySm, fontSize: 11, color: colors.emerald, textDecorationLine: 'underline', marginTop: 2 },
+
+  readBlock: {
+    paddingVertical: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.divider,
+    marginTop: spacing.sm,
+  },
+  readHead: { ...type.h3, color: colors.text, marginBottom: spacing.xs },
+  readRow: { flexDirection: 'row', marginTop: 4 },
+  readRowLabel: { ...type.bodySm, fontSize: 11, color: colors.textSubtle, width: 80, textTransform: 'uppercase', letterSpacing: 0.5 },
+  readRowValue: { ...type.bodySm, color: colors.text, flex: 1 },
 
   ctaRow: { flexDirection: 'row', marginTop: spacing.lg, gap: spacing.md },
 });

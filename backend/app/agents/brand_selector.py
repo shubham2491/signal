@@ -1,11 +1,8 @@
 """Brand Selector.
 
-Maps the vision read's aesthetic + market_segment + category to a short list
-of brands from the curated universe. We score brands by token overlap with
-aesthetic/category facets and return the top K.
-
-Returning a *short list* (4-6 brands) keeps downstream search costs bounded
-and matches the brief's principle: don't scan all brands blindly.
+Picks a shortlist of brands from the Indian-anchored universe based on
+pooled vision facets. Default targets bias toward India mid-premium and
+value, since that's the market SIGNAL is built for.
 """
 from __future__ import annotations
 
@@ -15,29 +12,46 @@ from app.data.brands import BRANDS, Brand
 from app.schemas import ImageRead
 
 
+# Maps free-text market/aesthetic tokens → segment buckets in brands.py.
 SEGMENT_HINTS = {
-    "premium": "premium_contemporary",
-    "premium contemporary": "premium_contemporary",
-    "minimal": "premium_contemporary",
-    "luxury": "luxury_reference",
-    "fast fashion": "global_fast_fashion",
-    "high street": "global_fast_fashion",
-    "trend": "global_fast_fashion",
-    "youth": "youth_digital",
-    "gen z": "youth_digital",
-    "street": "sports_street",
-    "athletic": "sports_street",
-    "sport": "sports_street",
-    "denim": "denim_casual",
-    "americana": "denim_casual",
-    "indian": "india",
-    "ethnic": "india",
-    "indowestern": "india",
+    # Indian value
+    "value": "india_value",
+    "budget": "india_value",
+    "mass": "india_value",
+    "tier-2": "india_value",
+    "tier 2": "india_value",
+    "tier-3": "india_value",
+    "fast fashion": "india_value",
+    "fast-fashion": "india_value",
+    # Indian mid-premium
+    "mid-premium": "india_mid_premium",
+    "mid premium": "india_mid_premium",
+    "premium": "india_mid_premium",
+    "premium contemporary": "india_mid_premium",
+    "contemporary": "india_mid_premium",
+    "high street": "india_mid_premium",
+    "workwear": "india_mid_premium",
+    "formal": "india_mid_premium",
+    "youth": "india_mid_premium",
+    "going out": "india_mid_premium",
+    "denim": "india_mid_premium",
+    "ethnic": "india_mid_premium",
+    "indowestern": "india_mid_premium",
+    "indo-western": "india_mid_premium",
+    "festive": "india_mid_premium",
+    # India premium / craft
+    "craft": "india_premium",
+    "handloom": "india_premium",
+    "natural fabric": "india_premium",
+    "minimal": "india_premium",
+    "elevated": "india_premium",
+    # Global brands with India presence (use sparingly as comparator)
+    "global": "global_in",
+    "european": "global_in",
 }
 
 
 def _aggregate(reads: list[ImageRead]) -> dict[str, list[str]]:
-    """Flatten N image reads into pooled facets."""
     aesthetics: list[str] = []
     categories: list[str] = []
     segments: list[str] = []
@@ -64,18 +78,21 @@ def _tokens(s: str) -> list[str]:
 
 
 def _segment_targets(segments: list[str], aesthetics: list[str]) -> set[str]:
-    """Derive likely brand segments from extracted text."""
     out: set[str] = set()
     haystack = " ".join(segments + aesthetics).lower()
     for hint, seg in SEGMENT_HINTS.items():
         if hint in haystack:
             out.add(seg)
+    # Default: blend value + mid-premium (covers ~90% of Indian retail signals).
     if not out:
-        out.update({"global_fast_fashion", "premium_contemporary"})
+        out.update({"india_value", "india_mid_premium"})
+    # Always include a global comparator so the brief has a recognisable anchor,
+    # but only as background — scored lower than India tiers below.
+    out.add("global_in")
     return out
 
 
-def select(reads: list[ImageRead], *, top_k: int = 5) -> list[Brand]:
+def select(reads: list[ImageRead], *, top_k: int = 6) -> list[Brand]:
     facets = _aggregate(reads)
     targets = _segment_targets(facets["segments"], facets["aesthetics"])
 
@@ -83,7 +100,8 @@ def select(reads: list[ImageRead], *, top_k: int = 5) -> list[Brand]:
     for b in BRANDS:
         score = 0
         if b.segment in targets:
-            score += 4
+            # India tiers weighted higher than global comparators.
+            score += 6 if b.segment.startswith("india_") else 2
         for token in facets["aesthetics"] + facets["keywords"]:
             if any(token in a for a in b.aesthetics):
                 score += 2
@@ -94,8 +112,8 @@ def select(reads: list[ImageRead], *, top_k: int = 5) -> list[Brand]:
             counter[b.name] = score
 
     if not counter:
-        # Sensible default for cold start: a spread across high-street + premium
-        default = ["Zara", "H&M", "Uniqlo", "COS", "Massimo Dutti"]
+        # Cold-start fallback: 4 India anchors + 1 global comparator.
+        default = ["Zudio", "Westside", "Snitch", "AND", "Zara India"]
         return [b for b in BRANDS if b.name in default][:top_k]
 
     top_names = [name for name, _ in counter.most_common(top_k)]
