@@ -186,9 +186,9 @@ class LLMClient:
         return self._backend.is_available
 
     async def vision_json(self, **kw) -> dict[str, Any]:
-        """Vision with built-in retry. No mock fallback at the caller —
-        if both attempts fail, the exception propagates so the user
-        sees a real error instead of templated text."""
+        """Vision with built-in retry + 429 backoff. If Gemini returns a
+        rate-limit error with a retry_delay hint, sleep that long and
+        retry transparently."""
         base_temp = kw.pop("temperature", 0.2)
         last_err: Exception | None = None
         for attempt in range(LLM_RETRY_ATTEMPTS):
@@ -199,17 +199,18 @@ class LLMClient:
                 )
             except Exception as e:
                 last_err = e
-                log.warning("vision_json attempt %d/%d failed (%s: %s)",
-                            attempt + 1, LLM_RETRY_ATTEMPTS, type(e).__name__, e)
+                wait_s = _rate_limit_wait(e)
+                log.warning("vision_json attempt %d/%d failed (%s: %s)%s",
+                            attempt + 1, LLM_RETRY_ATTEMPTS, type(e).__name__, str(e)[:160],
+                            f" — backing off {wait_s:.1f}s" if wait_s else "")
                 if attempt + 1 < LLM_RETRY_ATTEMPTS:
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(wait_s if wait_s else 0.5)
         raise last_err if last_err is not None else RuntimeError("vision_json failed")
 
     async def text_json(self, **kw) -> dict[str, Any]:
-        """text_json with built-in retry. Each attempt is bounded by
-        LLM_TEXT_TIMEOUT_S; on failure we bump temperature slightly and
-        try again. Surfaces the final exception so the caller can route
-        to a focused fallback."""
+        """text_json with built-in retry + 429 backoff. Each attempt is
+        bounded by LLM_TEXT_TIMEOUT_S; on a rate-limit error we wait
+        Gemini's suggested retry_delay before re-firing."""
         base_temp = kw.pop("temperature", 0.3)
         last_err: Exception | None = None
         for attempt in range(LLM_RETRY_ATTEMPTS):
@@ -221,12 +222,32 @@ class LLMClient:
                 )
             except (asyncio.TimeoutError, Exception) as e:
                 last_err = e
-                log.warning("text_json attempt %d/%d failed (%s: %s)",
-                            attempt + 1, LLM_RETRY_ATTEMPTS, type(e).__name__, e)
+                wait_s = _rate_limit_wait(e)
+                log.warning("text_json attempt %d/%d failed (%s: %s)%s",
+                            attempt + 1, LLM_RETRY_ATTEMPTS, type(e).__name__, str(e)[:160],
+                            f" — backing off {wait_s:.1f}s" if wait_s else "")
                 if attempt + 1 < LLM_RETRY_ATTEMPTS:
-                    await asyncio.sleep(0.4)  # tiny backoff
-        # All attempts exhausted — re-raise so the caller decides what to do.
+                    await asyncio.sleep(wait_s if wait_s else 0.4)
         raise last_err if last_err is not None else RuntimeError("text_json failed")
+
+
+def _rate_limit_wait(exc: Exception) -> float:
+    """If the exception is a rate-limit error, return the suggested
+    wait time in seconds (capped at 25s). Otherwise return 0.0."""
+    s = str(exc)
+    if "429" not in s and "RESOURCE_EXHAUSTED" not in s and "rate limit" not in s.lower():
+        return 0.0
+    # Gemini surfaces this as 'Please retry in 16.536953181s' or
+    # protobuf-formatted 'retry_delay { seconds: 16 }'.
+    import re
+    m = re.search(r"retry in (\d+(?:\.\d+)?)\s*s", s)
+    if m:
+        return min(float(m.group(1)) + 0.5, 25.0)
+    m = re.search(r"retry_delay\s*\{[^}]*seconds:\s*(\d+)", s)
+    if m:
+        return min(float(m.group(1)) + 0.5, 25.0)
+    # Unknown rate-limit format — back off 5s as a reasonable default.
+    return 5.0
 
 
 def _parse_json(raw: str) -> dict[str, Any]:
