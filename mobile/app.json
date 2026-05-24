@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "SIGNAL",
+    "slug": "signal",
+    "scheme": "signal",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "splash": {
+      "backgroundColor": "#FBF8F2",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.signal.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "SIGNAL uses the camera to capture fashion images for analysis. Photos are processed in memory and never stored.",
+        "NSPhotoLibraryUsageDescription": "SIGNAL accesses your photo library so you can analyse images you've already captured. Photos are processed in memory and never stored."
+      }
+    },
+    "android": {
+      "package": "com.signal.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#FBF8F2"
+      },
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE"]
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SIGNAL accesses your photo library so you can analyse images you've already captured.",
+          "cameraPermission": "SIGNAL uses the camera to capture fashion images for analysis."
+        }
+      ]
+    ],
+    "extra": {
+      "router": {
+        "origin": false
+      }
+    }
+  }
+}
