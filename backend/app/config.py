@@ -9,7 +9,10 @@ class Settings(BaseSettings):
     llm_provider: str = "gemini"   # gemini | openai
 
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    # gemini-2.0-flash: 15 RPM / 1500 RPD on the free tier — much more
+    # generous than 2.5-flash's 20 RPD. Switch back to 2.5 / 2.5-pro
+    # once on a paid plan if you want the stronger model.
+    gemini_model: str = "gemini-2.0-flash"
 
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"

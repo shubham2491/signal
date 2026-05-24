@@ -60,6 +60,36 @@ app.add_middleware(
 )
 
 
+def _classify_llm_error(exc: Exception) -> tuple[int, str]:
+    """Turn a Gemini / OpenAI exception into a user-friendly (status, detail).
+
+    Most useful pattern: the 429 'quota exceeded' that hits free-tier
+    users mid-demo. We extract the retry hint so the message is actionable
+    instead of a wall of protobuf."""
+    s = str(exc)
+    low = s.lower()
+    if "429" in s or "quota" in low or "rate limit" in low or "resource exhausted" in low:
+        # Try to pull "Please retry in 16.5s" out of Gemini's message.
+        import re
+        m = re.search(r"retry in (\d+(?:\.\d+)?)\s*s", s)
+        retry_hint = f" Try again in ~{int(float(m.group(1))) + 1}s." if m else ""
+        return 429, (
+            "Gemini free-tier quota exhausted for today (or this minute)."
+            + retry_hint
+            + " The free tier allows ~1500 requests/day on gemini-2.0-flash;"
+              " each analyze burns ~5. Wait or upgrade billing at"
+              " https://ai.google.dev/gemini-api/docs/billing."
+        )
+    if "404" in s and ("model" in low or "not found" in low):
+        return 503, (
+            "Configured Gemini model isn't available. Check GEMINI_MODEL "
+            f"env var. Underlying: {s[:300]}"
+        )
+    if "unavailable" in low or "no provider configured" in low:
+        return 503, f"LLM provider unavailable: {s[:400]}"
+    return 500, f"analysis failed: {s[:600]}"
+
+
 @app.get("/")
 async def health() -> dict[str, object]:
     settings = get_settings()
@@ -95,7 +125,8 @@ async def analyze(images: list[UploadFile] = File(...)) -> AnalysisReport:
         report = await pipeline.analyze(blobs)
     except Exception as e:
         log.exception("pipeline failure")
-        raise HTTPException(500, f"analysis failed: {e}") from e
+        status, detail = _classify_llm_error(e)
+        raise HTTPException(status, detail) from e
     # Cache normalized blobs so /export-report can embed them in the PDF.
     image_cache.put(report.id, blobs)
     return report
@@ -108,7 +139,8 @@ async def analyze_text(req: TextBriefRequest) -> AnalysisReport:
         return await pipeline.analyze_brief(req.brief)
     except Exception as e:
         log.exception("text brief pipeline failure")
-        raise HTTPException(500, f"analysis failed: {e}") from e
+        status, detail = _classify_llm_error(e)
+        raise HTTPException(status, detail) from e
 
 
 @app.post("/iterate-direction", response_model=RefineDirectionResponse)

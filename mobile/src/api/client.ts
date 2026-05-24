@@ -108,6 +108,24 @@ export type AnalysisReport = {
 
 export type UploadImage = { uri: string; name: string; mime: string };
 
+// Pull the human-readable bit out of FastAPI's {"detail": "..."} body and
+// pair it with a status-derived prefix so the user sees the actual message,
+// not a wall of JSON.
+async function _formatHttpError(resp: Response, fallback: string): Promise<Error> {
+  let body = '';
+  try { body = await resp.text(); } catch { /* ignore */ }
+  let detail = body;
+  try {
+    const parsed = JSON.parse(body);
+    if (typeof parsed?.detail === 'string') detail = parsed.detail;
+    else if (typeof parsed?.message === 'string') detail = parsed.message;
+  } catch { /* not JSON, use the raw body */ }
+  if (resp.status === 429) return new Error(detail || `${fallback}: rate limited`);
+  if (resp.status >= 500) return new Error(detail || `${fallback}: server error (${resp.status})`);
+  if (resp.status >= 400) return new Error(detail || `${fallback}: ${resp.status}`);
+  return new Error(detail || `${fallback} (${resp.status})`);
+}
+
 export async function analyze(images: UploadImage[]): Promise<AnalysisReport> {
   const form = new FormData();
   for (let i = 0; i < images.length; i++) {
@@ -132,8 +150,7 @@ export async function analyze(images: UploadImage[]): Promise<AnalysisReport> {
   });
 
   if (!resp.ok) {
-    const body = await resp.text().catch(() => '');
-    throw new Error(`analyze failed (${resp.status}): ${body || resp.statusText}`);
+    throw await _formatHttpError(resp, 'Analysis failed');
   }
   return (await resp.json()) as AnalysisReport;
 }
@@ -183,7 +200,7 @@ export async function refineDirection(args: {
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => '');
-    throw new Error(`refine failed (${resp.status}): ${body || resp.statusText}`);
+    throw new Error(body || `Refine failed (${resp.status})`);
   }
   const data = await resp.json();
   return data.direction as Direction;
@@ -196,8 +213,7 @@ export async function analyzeBrief(brief: string): Promise<AnalysisReport> {
     body: JSON.stringify({ brief }),
   });
   if (!resp.ok) {
-    const body = await resp.text().catch(() => '');
-    throw new Error(`analyze-text failed (${resp.status}): ${body || resp.statusText}`);
+    throw await _formatHttpError(resp, 'Brief failed');
   }
   return (await resp.json()) as AnalysisReport;
 }
