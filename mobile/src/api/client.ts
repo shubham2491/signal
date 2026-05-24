@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 const FALLBACK = 'http://localhost:8000';
 
@@ -69,16 +70,20 @@ export type UploadImage = { uri: string; name: string; mime: string };
 
 export async function analyze(images: UploadImage[]): Promise<AnalysisReport> {
   const form = new FormData();
-  images.forEach((img, i) => {
-    // React Native's FormData accepts {uri, name, type} for binary uploads;
-    // the standard DOM typing doesn't model this so we cast through unknown.
-    const part = {
-      uri: img.uri,
-      name: img.name || `image_${i}.jpg`,
-      type: img.mime || 'image/jpeg',
-    } as unknown as Blob;
-    form.append('images', part);
-  });
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i];
+    const name = img.name || `image_${i}.jpg`;
+    if (Platform.OS === 'web') {
+      // Browsers' FormData rejects {uri,name,type} shorthand — fetch the
+      // blob: / data: URL the web image picker hands back and append a real Blob.
+      const blob = await (await fetch(img.uri)).blob();
+      form.append('images', blob, name);
+    } else {
+      // React Native's FormData accepts {uri, name, type} for binary uploads.
+      const part = { uri: img.uri, name, type: img.mime || 'image/jpeg' } as unknown as Blob;
+      form.append('images', part);
+    }
+  }
 
   const resp = await fetch(`${API_BASE}/analyze`, {
     method: 'POST',
