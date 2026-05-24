@@ -4,8 +4,14 @@ const FALLBACK = 'http://localhost:8000';
 
 const extraUrl = (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl;
 
+const runtimeUrl =
+  typeof globalThis !== 'undefined' &&
+  typeof (globalThis as { SIGNAL_API_URL?: string }).SIGNAL_API_URL === 'string'
+    ? (globalThis as { SIGNAL_API_URL?: string }).SIGNAL_API_URL
+    : undefined;
+
 export const API_BASE: string =
-  process.env.EXPO_PUBLIC_API_URL || extraUrl || FALLBACK;
+  runtimeUrl || process.env.EXPO_PUBLIC_API_URL || extraUrl || FALLBACK;
 
 export type Mode =
   | 'product_study'
