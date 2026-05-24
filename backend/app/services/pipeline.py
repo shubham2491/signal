@@ -27,6 +27,7 @@ from app.schemas import (
     GroupReport,
     ImageRead,
     Mode,
+    VisionAttributes,
 )
 
 log = logging.getLogger(__name__)
@@ -43,6 +44,60 @@ _GROUP_LABELS = {
     "co_ord": "Co-ord Sets",
     "unknown": "Other",
 }
+
+
+async def analyze_brief(brief: str) -> AnalysisReport:
+    """Run the pipeline from a free-text designer brief (no images).
+
+    We synthesise a single ImageRead by treating the brief itself as the
+    keyword soup the downstream agents expect, then skip vision/search
+    and run brand_selector + commentary + recommendation. The mode is
+    fixed to 'moodboard' since text briefs are most analogous to a
+    mood-board input.
+    """
+    brief = brief.strip()
+    if not brief:
+        raise ValueError("brief is required")
+
+    # Tokenise the brief into keywords. Keep short tokens (>=3 chars).
+    raw_tokens = [t.strip().lower() for t in brief.replace(",", " ").replace(".", " ").split()]
+    keywords = [t for t in raw_tokens if len(t) >= 3][:12]
+
+    synthetic_read = ImageRead(
+        index=0,
+        attributes=VisionAttributes(
+            category="",  # left blank; brief lives in aesthetic
+            aesthetic=brief[:200],
+            market_segment="mid-premium",
+            notes=f"Synthesised from text brief: {brief[:200]}",
+            shot_type="unknown",
+            category_group="unknown",
+        ),
+        keywords=keywords,
+    )
+    reads = [synthetic_read]
+    mode = "moodboard"  # type: ignore[assignment]
+
+    top_level = await _build_section(reads, mode)
+
+    return AnalysisReport(
+        id=str(uuid.uuid4()),
+        mode=mode,
+        mode_confidence=1.0,
+        image_count=0,
+        observation=top_level["observation"],
+        summary=top_level["summary"],
+        brand_signals=[BrandSignal(**s) for s in top_level["brand_signals"]],
+        commentary=top_level["commentary"],
+        directions=[d if isinstance(d, Direction) else Direction(**d) for d in top_level["directions"]],
+        keywords=top_level["keywords"],
+        reads=reads,
+        groups=[],
+        palette=top_level.get("palette", []),
+        price_strategy=top_level.get("price_strategy", ""),
+        production_notes=top_level.get("production_notes", ""),
+        merchandising=top_level.get("merchandising", ""),
+    )
 
 
 async def analyze(images: list[bytes]) -> AnalysisReport:

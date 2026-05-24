@@ -153,6 +153,19 @@ export async function emailReport(
   return resp.json();
 }
 
+export async function analyzeBrief(brief: string): Promise<AnalysisReport> {
+  const resp = await fetch(`${API_BASE}/analyze-text`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ brief }),
+  });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`analyze-text failed (${resp.status}): ${body || resp.statusText}`);
+  }
+  return (await resp.json()) as AnalysisReport;
+}
+
 export async function health(): Promise<{ ok: boolean; llm_configured: boolean; search_configured: boolean }> {
   const resp = await fetch(`${API_BASE}/`);
   return resp.json();

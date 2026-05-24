@@ -23,6 +23,7 @@ from app.schemas import (
     EmailResponse,
     ExportRequest,
     ExportResponse,
+    TextBriefRequest,
 )
 from app.services import pdf as pdf_service
 from app.services import image_cache, pipeline, reports
@@ -96,6 +97,16 @@ async def analyze(images: list[UploadFile] = File(...)) -> AnalysisReport:
     # Cache normalized blobs so /export-report can embed them in the PDF.
     image_cache.put(report.id, blobs)
     return report
+
+
+@app.post("/analyze-text", response_model=AnalysisReport)
+async def analyze_text(req: TextBriefRequest) -> AnalysisReport:
+    """Run the brief pipeline from a free-text input (no images)."""
+    try:
+        return await pipeline.analyze_brief(req.brief)
+    except Exception as e:
+        log.exception("text brief pipeline failure")
+        raise HTTPException(500, f"analysis failed: {e}") from e
 
 
 @app.post("/export-report", response_model=ExportResponse)

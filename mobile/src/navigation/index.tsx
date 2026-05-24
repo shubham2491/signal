@@ -13,6 +13,7 @@ import { ResultsScreen } from '@/screens/ResultsScreen';
 import { HistoryScreen } from '@/screens/HistoryScreen';
 import { ExportScreen } from '@/screens/ExportScreen';
 import { ProfileScreen } from '@/screens/ProfileScreen';
+import { TrendsScreen } from '@/screens/TrendsScreen';
 
 export type SelectedImage = { uri: string; mime: string; name: string };
 
@@ -28,6 +29,7 @@ export type RootStackParamList = {
 
 export type TabParamList = {
   Home: undefined;
+  Trends: undefined;
   History: undefined;
   Profile: undefined;
 };
@@ -61,6 +63,13 @@ function TabsNavigator() {
         component={HomeScreen}
         options={{
           tabBarIcon: ({ focused }) => <TabIcon glyph="◉" active={focused} />,
+        }}
+      />
+      <Tabs.Screen
+        name="Trends"
+        component={TrendsScreen}
+        options={{
+          tabBarIcon: ({ focused }) => <TabIcon glyph="✦" active={focused} />,
         }}
       />
       <Tabs.Screen

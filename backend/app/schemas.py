@@ -114,6 +114,10 @@ class AnalysisReport(BaseModel):
     merchandising: str = ""           # adjacent SKUs + shelf strategy
 
 
+class TextBriefRequest(BaseModel):
+    brief: str = Field(..., min_length=4, max_length=2000)
+
+
 class ExportRequest(BaseModel):
     report: AnalysisReport
 
