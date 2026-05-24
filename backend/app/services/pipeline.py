@@ -97,6 +97,12 @@ async def analyze_brief(brief: str) -> AnalysisReport:
         price_strategy=top_level.get("price_strategy", ""),
         production_notes=top_level.get("production_notes", ""),
         merchandising=top_level.get("merchandising", ""),
+        consumer=top_level.get("consumer", ""),
+        why_now=top_level.get("why_now", ""),
+        india_play=top_level.get("india_play", ""),
+        price_anchor_inr=top_level.get("price_anchor_inr", ""),
+        price_floor_inr=top_level.get("price_floor_inr", ""),
+        price_target_inr=top_level.get("price_target_inr", ""),
     )
 
 
@@ -136,6 +142,12 @@ async def analyze(images: list[bytes]) -> AnalysisReport:
         price_strategy=top_level.get("price_strategy", ""),
         production_notes=top_level.get("production_notes", ""),
         merchandising=top_level.get("merchandising", ""),
+        consumer=top_level.get("consumer", ""),
+        why_now=top_level.get("why_now", ""),
+        india_play=top_level.get("india_play", ""),
+        price_anchor_inr=top_level.get("price_anchor_inr", ""),
+        price_floor_inr=top_level.get("price_floor_inr", ""),
+        price_target_inr=top_level.get("price_target_inr", ""),
     )
 
 
@@ -163,6 +175,12 @@ async def _build_section(reads: list[ImageRead], mode: Mode) -> dict:
         "price_strategy": commentary.get("price_strategy", ""),
         "production_notes": commentary.get("production_notes", ""),
         "merchandising": commentary.get("merchandising", ""),
+        "consumer": commentary.get("consumer", ""),
+        "why_now": commentary.get("why_now", ""),
+        "india_play": commentary.get("india_play", ""),
+        "price_anchor_inr": commentary.get("price_anchor_inr", ""),
+        "price_floor_inr": commentary.get("price_floor_inr", ""),
+        "price_target_inr": commentary.get("price_target_inr", ""),
     }
 
 

@@ -109,9 +109,16 @@ class AnalysisReport(BaseModel):
     groups: list[GroupReport] = []
     # Phase 4: structured actionable layer for the designer.
     palette: list[str] = []           # 4-6 named trade colors
-    price_strategy: str = ""          # INR ladder + gap reasoning
+    price_strategy: str = ""          # INR ladder + gap reasoning (no Indian retailer names)
     production_notes: str = ""        # fabric + complexity + trim spec
     merchandising: str = ""           # adjacent SKUs + shelf strategy
+    # Phase 5: India-translation depth (no Indian retailer names in narrative)
+    consumer: str = ""                # who buys + when worn (1-2 sentences)
+    why_now: str = ""                 # why this signal lands in India now (1-2 sentences)
+    india_play: str = ""              # HOW to launch: distribution + timing + format (2-3 sentences)
+    price_anchor_inr: str = ""        # short: aspirational anchor (e.g. "Zara INR 2,990")
+    price_floor_inr: str = ""         # short: Indian value-floor band (e.g. "INR 499-899")
+    price_target_inr: str = ""        # short: recommended MRP (e.g. "INR 999-1,299")
 
 
 class TextBriefRequest(BaseModel):

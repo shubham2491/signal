@@ -1,11 +1,18 @@
 """Brand Selector.
 
-Picks 5 brands per analysis for an Indian fast-fashion designer:
-  - 3 aspirational anchors (Zara / H&M / Uniqlo / COS / Mango / etc.)
-  - 2 Indian competitive shelf brands (Zudio / Westside / Pantaloons / etc.)
+Picks 5 INTERNATIONAL ASPIRATIONAL brands per analysis. The reference
+set is the global accessible aspirational tier (Zara, H&M, Uniqlo, COS,
+Mango, Massimo Dutti, Arket, Theory, Reiss, Madewell, Sezane, Aritzia,
+etc.) — never Indian retail.
 
 When the read leans ethnic / craft / indo-fusion, we swap one slot to
-an india_premium brand (FabIndia, Nicobar, etc.).
+an india_premium brand (FabIndia, Nicobar) because that's where the
+craft adjacency actually exists internationally.
+
+The Indian competitive shelf (Zudio / Westside / Pantaloons) is
+DELIBERATELY excluded from the signal list — the designer already lives
+on that shelf; the value of SIGNAL is naming the aspirational anchor
+they should be translating FROM.
 """
 from __future__ import annotations
 
@@ -86,42 +93,33 @@ def select(reads: list[ImageRead], *, top_k: int = 5) -> list[Brand]:
     facets = _aggregate(reads)
     ethnic = _is_ethnic(facets)
 
-    # Group brands by tier and pre-score each.
     by_segment: dict[str, list[tuple[Brand, int]]] = {
         "global_aspirational": [],
-        "india_competitive": [],
         "india_premium": [],
     }
     for b in BRANDS:
-        scored = (b, _score_brand(b, facets))
-        if b.segment in by_segment:
-            by_segment[b.segment].append(scored)
+        if b.segment not in by_segment:
+            continue
+        by_segment[b.segment].append((b, _score_brand(b, facets)))
 
-    # Sort each tier by aesthetic-match score desc, then default-rank desc.
     for k in by_segment:
         by_segment[k].sort(key=lambda x: (-x[1], -_DEFAULT_RANK.get(x[0].name, 0), x[0].name))
 
-    # Composition: 3 aspirational + 2 Indian.
-    # If the read leans ethnic, swap 1 aspirational for 1 india_premium.
+    # Composition: 5 INTERNATIONAL aspirational brands.
+    # If the read leans ethnic, swap 1 slot for a craft-adjacency brand.
     picks: list[Brand] = []
-    asp_slots = 2 if ethnic else 3
-    ind_slots = 2
+    asp_slots = top_k - 1 if ethnic else top_k
 
     picks.extend([b for b, _ in by_segment["global_aspirational"][:asp_slots]])
-    picks.extend([b for b, _ in by_segment["india_competitive"][:ind_slots]])
     if ethnic:
         picks.extend([b for b, _ in by_segment["india_premium"][:1]])
 
-    # If somehow short, top up with any remaining highest-scoring brands.
     if len(picks) < top_k:
         seen = {b.name for b in picks}
-        all_scored = sorted(
-            [(b, _score_brand(b, facets)) for b in BRANDS if b.name not in seen],
-            key=lambda x: (-x[1], x[0].name),
-        )
-        for b, _ in all_scored:
-            picks.append(b)
-            if len(picks) >= top_k:
-                break
+        for b, _ in by_segment["global_aspirational"]:
+            if b.name not in seen:
+                picks.append(b)
+                if len(picks) >= top_k:
+                    break
 
     return picks[:top_k]

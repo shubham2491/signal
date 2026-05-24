@@ -1,20 +1,29 @@
 import React, { useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Image,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, CommonActions } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
-import { ImageCollage } from '@/components/ImageCollage';
 import { Kicker } from '@/components/Kicker';
-import { ScreenHeader } from '@/components/ScreenHeader';
 import { SimilarityPill } from '@/components/SimilarityPill';
 import { colors, radii, spacing, type } from '@/theme';
 import type { RootStackParamList } from '@/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Results'>;
 type Nav = NativeStackNavigationProp<RootStackParamList, 'Results'>;
+
+const HERO_HEIGHT = 360;
 
 export function ResultsScreen() {
   const route = useRoute<Props['route']>();
@@ -23,113 +32,252 @@ export function ResultsScreen() {
   const [showDetail, setShowDetail] = useState(false);
 
   const modeLabel = report.mode.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const hasHeroImage = thumbnails.length > 0;
+  const hero = thumbnails[0];
+  const extraThumbs = thumbnails.slice(1, 5);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <ScreenHeader
-        onBack={() =>
-          nav.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Tabs' }] }))
-        }
-        right={
-          <Pressable onPress={() => nav.navigate('Export', { report })} hitSlop={12}>
-            <Text style={styles.exportLink}>Export</Text>
-          </Pressable>
-        }
-      />
-
+    <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scroll}
+        stickyHeaderIndices={[]}
       >
-        <View style={styles.heroRow}>
-          <ImageCollage uris={thumbnails} size={88} />
-          <View style={styles.heroText}>
-            <Kicker>{modeLabel} · {report.image_count} image{report.image_count === 1 ? '' : 's'}</Kicker>
-            <Text style={styles.observation}>{report.observation}</Text>
+        {/* ─── HERO ─────────────────────────────────────────────── */}
+        <View style={styles.hero}>
+          {hasHeroImage ? (
+            <Image source={{ uri: hero }} style={styles.heroImg} resizeMode="cover" />
+          ) : (
+            <View style={[styles.heroImg, styles.heroFallback]} />
+          )}
+          <View style={styles.heroOverlay} />
+          {/* Floating header chips */}
+          <SafeAreaView edges={['top']} style={styles.heroChromeWrap} pointerEvents="box-none">
+            <View style={styles.heroChrome}>
+              <Pressable
+                onPress={() => nav.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Tabs' }] }))}
+                style={styles.heroBtn}
+                hitSlop={12}
+              >
+                <Text style={styles.heroBtnText}>←</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => nav.navigate('Export', { report })}
+                style={styles.heroBtnWide}
+                hitSlop={12}
+              >
+                <Text style={styles.heroBtnText}>Export ↗</Text>
+              </Pressable>
+            </View>
+          </SafeAreaView>
+          {/* Bottom-anchored editorial title */}
+          <View style={styles.heroBottom}>
+            <Text style={styles.heroKicker}>SIGNAL · {modeLabel.toUpperCase()}</Text>
+            <Text style={styles.heroObservation}>{report.observation}</Text>
+            {report.summary ? (
+              <Text style={styles.heroSummary}>{report.summary}</Text>
+            ) : null}
           </View>
         </View>
 
-        {report.summary ? (
-          <Text style={styles.summary}>{report.summary}</Text>
+        {/* ─── ADDITIONAL UPLOADED IMAGES (strip) ───────────────── */}
+        {extraThumbs.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.thumbStrip}
+          >
+            {extraThumbs.map((uri, idx) => (
+              <Image key={uri + idx} source={{ uri }} style={styles.thumbStripImg} />
+            ))}
+            {thumbnails.length > 5 ? (
+              <View style={[styles.thumbStripImg, styles.thumbStripMore]}>
+                <Text style={styles.thumbStripMoreText}>+{thumbnails.length - 5}</Text>
+              </View>
+            ) : null}
+          </ScrollView>
         ) : null}
 
-        {/* SECTION 2: Brand Signals as a 2-col card grid */}
-        <View style={{ marginTop: spacing.xl }}>
-          <Kicker>Brand Signals</Kicker>
-          <View style={styles.brandGrid}>
-            {report.brand_signals.map((sig) => (
-              <View key={sig.brand} style={styles.brandCard}>
-                <Text style={styles.brandWordmark} numberOfLines={1}>{sig.brand}</Text>
-                <View style={{ marginTop: spacing.xs }}>
+        {/* ─── THE INDIA TRANSLATION (main hook) ────────────────── */}
+        <View style={styles.padX}>
+          <View style={{ height: spacing.xl }} />
+          <View style={styles.sectionLabelRow}>
+            <View style={styles.accentBar} />
+            <Text style={styles.sectionLabel}>The India Translation</Text>
+          </View>
+
+          {report.why_now ? (
+            <View style={styles.whyCard}>
+              <Text style={styles.whyKicker}>WHY NOW</Text>
+              <Text style={styles.whyText}>{report.why_now}</Text>
+            </View>
+          ) : null}
+
+          {report.consumer ? (
+            <View style={styles.consumerCard}>
+              <Text style={styles.consumerKicker}>WHO BUYS · WHEN WORN</Text>
+              <Text style={styles.consumerText}>{report.consumer}</Text>
+            </View>
+          ) : null}
+        </View>
+
+        {/* ─── COMMENTARY (the WHY in prose) ────────────────────── */}
+        {report.commentary ? (
+          <View style={styles.padX}>
+            <View style={styles.sectionLabelRow}>
+              <View style={styles.accentBar} />
+              <Text style={styles.sectionLabel}>The Read</Text>
+            </View>
+            <Text style={styles.commentaryText}>{report.commentary}</Text>
+          </View>
+        ) : null}
+
+        {/* ─── INTERNATIONAL ANCHORS (horizontal carousel) ──────── */}
+        <View>
+          <View style={[styles.padX, styles.sectionLabelRow]}>
+            <View style={styles.accentBar} />
+            <Text style={styles.sectionLabel}>International Anchors</Text>
+          </View>
+          <Text style={[styles.padX, styles.sectionSub]}>
+            The aspirational reference set. Translate from these.
+          </Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.brandStrip}
+            decelerationRate="fast"
+            snapToInterval={244}
+            snapToAlignment="start"
+          >
+            {report.brand_signals.map((sig, idx) => (
+              <View key={sig.brand} style={[styles.brandCard, idx === 0 ? { marginLeft: spacing.xl } : null]}>
+                <View style={styles.brandCardTop}>
+                  <Text style={styles.brandCardNum}>{String(idx + 1).padStart(2, '0')}</Text>
                   <SimilarityPill value={sig.similarity} />
                 </View>
-                <Text style={styles.brandCardRationale} numberOfLines={3}>{sig.rationale}</Text>
+                <Text style={styles.brandCardName}>{sig.brand}</Text>
+                <Text style={styles.brandCardRationale}>{sig.rationale}</Text>
               </View>
             ))}
-          </View>
+          </ScrollView>
         </View>
 
-        {/* SECTION 3: Market Commentary */}
-        {report.commentary ? (
-          <Card style={{ marginTop: spacing.lg }}>
-            <Kicker>Market Commentary</Kicker>
-            <Text style={styles.commentary}>{report.commentary}</Text>
-          </Card>
-        ) : null}
-
-        {/* SECTION 3b: Palette */}
-        {report.palette && report.palette.length > 0 ? (
-          <Card style={{ marginTop: spacing.lg }}>
-            <Kicker>Palette</Kicker>
-            <View style={styles.paletteRow}>
-              {report.palette.map((c) => (
-                <View key={c} style={styles.swatchWrap}>
-                  <View style={[styles.swatch, { backgroundColor: colorToHex(c) }]} />
-                  <Text style={styles.swatchLabel}>{c}</Text>
-                </View>
-              ))}
+        {/* ─── PRICE LADDER (3-up) ─────────────────────────────── */}
+        {(report.price_anchor_inr || report.price_floor_inr || report.price_target_inr) ? (
+          <View style={styles.padX}>
+            <View style={styles.sectionLabelRow}>
+              <View style={styles.accentBar} />
+              <Text style={styles.sectionLabel}>Price Ladder</Text>
             </View>
-          </Card>
-        ) : null}
 
-        {/* SECTION 3c: Price strategy */}
-        {report.price_strategy ? (
-          <Card style={[styles.priceCard, { marginTop: spacing.lg }]}>
-            <Kicker color={colors.emerald}>Price Strategy</Kicker>
-            <Text style={styles.priceText}>{report.price_strategy}</Text>
-          </Card>
-        ) : null}
+            <View style={styles.ladderRow}>
+              <View style={[styles.ladderCol, styles.ladderColAnchor]}>
+                <Text style={styles.ladderTag}>ASPIRATIONAL ANCHOR</Text>
+                <Text style={styles.ladderValue}>{report.price_anchor_inr || '—'}</Text>
+                <Text style={styles.ladderSub}>The global look</Text>
+              </View>
+              <View style={styles.ladderArrow}>
+                <Text style={styles.ladderArrowText}>→</Text>
+              </View>
+              <View style={[styles.ladderCol, styles.ladderColFloor]}>
+                <Text style={styles.ladderTag}>INDIA VALUE FLOOR</Text>
+                <Text style={styles.ladderValue}>{report.price_floor_inr || '—'}</Text>
+                <Text style={styles.ladderSub}>Where it lands today</Text>
+              </View>
+              <View style={styles.ladderArrow}>
+                <Text style={styles.ladderArrowText}>→</Text>
+              </View>
+              <View style={[styles.ladderCol, styles.ladderColTarget]}>
+                <Text style={[styles.ladderTag, { color: '#fff', opacity: 0.85 }]}>YOUR MRP</Text>
+                <Text style={[styles.ladderValue, { color: '#fff' }]}>{report.price_target_inr || '—'}</Text>
+                <Text style={[styles.ladderSub, { color: '#fff', opacity: 0.85 }]}>Recommended</Text>
+              </View>
+            </View>
 
-        {/* SECTION 3d: Production + Merchandising side-by-side feel */}
-        {report.production_notes || report.merchandising ? (
-          <View style={{ marginTop: spacing.lg, gap: spacing.md }}>
-            {report.production_notes ? (
-              <Card>
-                <Kicker>Production Notes</Kicker>
-                <Text style={styles.subBlockText}>{report.production_notes}</Text>
-              </Card>
-            ) : null}
-            {report.merchandising ? (
-              <Card>
-                <Kicker>Merchandising</Kicker>
-                <Text style={styles.subBlockText}>{report.merchandising}</Text>
-              </Card>
+            {report.price_strategy ? (
+              <Text style={styles.ladderProse}>{report.price_strategy}</Text>
             ) : null}
           </View>
         ) : null}
 
-        {/* SECTION 4: Recommended Directions as tinted cards */}
-        <View style={{ marginTop: spacing.xl }}>
-          <Kicker>Recommended Directions</Kicker>
-          <View style={{ height: spacing.md }} />
+        {/* ─── INDIA PLAY (HOW to launch) ──────────────────────── */}
+        {report.india_play ? (
+          <View style={styles.padX}>
+            <View style={styles.indiaPlayCard}>
+              <Text style={styles.indiaPlayKicker}>HOW TO LAUNCH</Text>
+              <Text style={styles.indiaPlayText}>{report.india_play}</Text>
+            </View>
+          </View>
+        ) : null}
+
+        {/* ─── PALETTE ─────────────────────────────────────────── */}
+        {report.palette && report.palette.length > 0 ? (
+          <View>
+            <View style={[styles.padX, styles.sectionLabelRow]}>
+              <View style={styles.accentBar} />
+              <Text style={styles.sectionLabel}>Palette</Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.paletteStrip}
+            >
+              {report.palette.map((c, idx) => {
+                const hex = colorToHex(c);
+                return (
+                  <View key={c + idx} style={[styles.swatchWrap, idx === 0 ? { marginLeft: spacing.xl } : null]}>
+                    <View style={[styles.swatch, { backgroundColor: hex }]} />
+                    <Text style={styles.swatchLabel}>{c}</Text>
+                    <Text style={styles.swatchHex}>{hex.toUpperCase()}</Text>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </View>
+        ) : null}
+
+        {/* ─── PRODUCTION + MERCHANDISING ──────────────────────── */}
+        {report.production_notes || report.merchandising ? (
+          <View style={styles.padX}>
+            <View style={styles.sectionLabelRow}>
+              <View style={styles.accentBar} />
+              <Text style={styles.sectionLabel}>On the Floor</Text>
+            </View>
+            <View style={styles.opsRow}>
+              {report.production_notes ? (
+                <View style={styles.opsCol}>
+                  <Text style={styles.opsKicker}>PRODUCTION</Text>
+                  <Text style={styles.opsText}>{report.production_notes}</Text>
+                </View>
+              ) : null}
+              {report.merchandising ? (
+                <View style={styles.opsCol}>
+                  <Text style={styles.opsKicker}>MERCHANDISING</Text>
+                  <Text style={styles.opsText}>{report.merchandising}</Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
+        {/* ─── DIRECTIONS ──────────────────────────────────────── */}
+        <View style={styles.padX}>
+          <View style={styles.sectionLabelRow}>
+            <View style={styles.accentBar} />
+            <Text style={styles.sectionLabel}>Three Routes Forward</Text>
+          </View>
           {report.directions.map((d) => {
             const meta = DIRECTION_META[d.label] || DIRECTION_META.fallback;
-            const metaBits = [d.price_band_inr, d.complexity ? `${d.complexity} to make` : '', d.timing]
-              .filter(Boolean) as string[];
+            const metaBits = [
+              d.price_band_inr,
+              d.complexity ? `${d.complexity} build` : '',
+              d.timing,
+            ].filter(Boolean) as string[];
             return (
               <View key={d.label} style={[styles.dirCard, { backgroundColor: meta.tint }]}>
                 <View style={styles.dirCardHead}>
-                  <Text style={[styles.dirCardLabel, { color: meta.color }]}>{meta.glyph}  {d.label.toUpperCase()}</Text>
+                  <Text style={styles.dirCardGlyph}>{meta.glyph}</Text>
+                  <Text style={[styles.dirCardLabel, { color: meta.color }]}>{d.label.toUpperCase()}</Text>
                 </View>
                 <Text style={styles.dirCardTitle}>{d.title}</Text>
                 <Text style={styles.dirCardDesc}>{d.description}</Text>
@@ -147,13 +295,15 @@ export function ResultsScreen() {
           })}
         </View>
 
-        {/* SECTION 5: Per-category breakdown (only when multi-category upload) */}
+        {/* ─── PER-CATEGORY BREAKDOWN ──────────────────────────── */}
         {report.groups && report.groups.length > 1 ? (
-          <View style={{ marginTop: spacing.xl }}>
-            <Kicker>By Category</Kicker>
+          <View style={styles.padX}>
+            <View style={styles.sectionLabelRow}>
+              <View style={styles.accentBar} />
+              <Text style={styles.sectionLabel}>By Category</Text>
+            </View>
             <Text style={styles.byCatLead}>
-              We detected {report.groups.length} categories in your upload. Each gets its own
-              brand signals and direction below.
+              {report.groups.length} categories detected. Each gets its own signal and direction.
             </Text>
             {report.groups.map((g) => (
               <Card key={g.group_id + g.label} style={{ marginTop: spacing.md }}>
@@ -165,7 +315,6 @@ export function ResultsScreen() {
                 </View>
                 <Text style={styles.groupObs}>{g.observation}</Text>
                 {g.summary ? <Text style={styles.groupSummary}>{g.summary}</Text> : null}
-
                 {g.brand_signals.length ? (
                   <View style={styles.groupBrands}>
                     {g.brand_signals.slice(0, 4).map((sig) => (
@@ -176,172 +325,113 @@ export function ResultsScreen() {
                     ))}
                   </View>
                 ) : null}
-
-                {g.commentary ? (
-                  <Text style={styles.groupCommentary}>{g.commentary}</Text>
-                ) : null}
-
-                {g.directions.length ? (
-                  <View style={styles.groupDirections}>
-                    {g.directions.map((d) => (
-                      <View key={d.label} style={styles.groupDirRow}>
-                        <Text style={styles.groupDirLabel}>{d.label.toUpperCase()}</Text>
-                        <Text style={styles.groupDirTitle}>{d.title}</Text>
-                      </View>
-                    ))}
-                  </View>
-                ) : null}
+                {g.commentary ? <Text style={styles.groupCommentary}>{g.commentary}</Text> : null}
               </Card>
             ))}
           </View>
         ) : null}
 
-        {/* Progressive disclosure: power-user detail layer */}
-        <Pressable onPress={() => setShowDetail(v => !v)} style={styles.detailToggle}>
-          <Text style={styles.detailToggleText}>
-            {showDetail ? 'Hide full intelligence' : 'See full intelligence'}
-          </Text>
-        </Pressable>
-
-        {showDetail ? (
-          <Card flat style={[styles.detailCard, { marginBottom: spacing.xl }]}>
-            {/* Detection meta */}
-            <Kicker>Detection</Kicker>
-            <Text style={styles.metaLine}>
-              {modeLabel} · confidence {(report.mode_confidence * 100).toFixed(0)}%
-              {'  ·  '}
-              {report.image_count} image{report.image_count === 1 ? '' : 's'}
+        {/* ─── DETAIL DRAWER ───────────────────────────────────── */}
+        <View style={styles.padX}>
+          <Pressable onPress={() => setShowDetail((v) => !v)} style={styles.detailToggle}>
+            <Text style={styles.detailToggleText}>
+              {showDetail ? '— Hide full intelligence' : '+ See full intelligence'}
             </Text>
+          </Pressable>
 
-            {report.keywords.length ? (
-              <>
-                <View style={{ height: spacing.lg }} />
-                <Kicker>Keywords ({report.keywords.length})</Kicker>
-                <View style={styles.chipRow}>
-                  {report.keywords.map((k) => (
-                    <View key={k} style={styles.chip}>
-                      <Text style={styles.chipText}>{k}</Text>
-                    </View>
-                  ))}
-                </View>
-              </>
-            ) : null}
+          {showDetail ? (
+            <Card flat style={[styles.detailCard, { marginBottom: spacing.xl }]}>
+              <Kicker>Detection</Kicker>
+              <Text style={styles.metaLine}>
+                {modeLabel} · confidence {(report.mode_confidence * 100).toFixed(0)}% · {report.image_count} image
+                {report.image_count === 1 ? '' : 's'}
+              </Text>
 
-            {/* Per-brand citations */}
-            {report.brand_signals.some(s => s.citations.length) ? (
-              <>
-                <View style={{ height: spacing.lg }} />
-                <Kicker>Brand Citations</Kicker>
-                {report.brand_signals.filter(s => s.citations.length).map((s) => (
-                  <View key={s.brand} style={styles.citeBlock}>
-                    <Text style={styles.citeBrand}>{s.brand}</Text>
-                    {s.citations.map((url, idx) => (
-                      <Pressable key={url + idx} onPress={() => Linking.openURL(url).catch(() => {})}>
-                        <Text style={styles.citeLink} numberOfLines={1}>
-                          {url.replace(/^https?:\/\//, '')}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                ))}
-              </>
-            ) : null}
-
-            {/* Per-image full reads */}
-            <View style={{ height: spacing.lg }} />
-            <Kicker>Per-Image Reads ({report.reads.length})</Kicker>
-            {report.reads.map((r) => (
-              <View key={r.index} style={styles.readBlock}>
-                <Text style={styles.readHead}>
-                  Image {r.index + 1} — {r.attributes.category || 'apparel'}
-                </Text>
-
-                {r.attributes.silhouette ? (
-                  <ReadRow label="Silhouette" value={r.attributes.silhouette} />
-                ) : null}
-                {r.attributes.fabric_guess ? (
-                  <ReadRow label="Fabric" value={r.attributes.fabric_guess} />
-                ) : null}
-                {r.attributes.colors.length ? (
-                  <ReadRow label="Colors" value={r.attributes.colors.join(', ')} />
-                ) : null}
-                {r.attributes.styling.length ? (
-                  <ReadRow label="Styling" value={r.attributes.styling.join(', ')} />
-                ) : null}
-                {r.attributes.trims.length ? (
-                  <ReadRow label="Trims" value={r.attributes.trims.join(', ')} />
-                ) : null}
-                {r.attributes.aesthetic ? (
-                  <ReadRow label="Aesthetic" value={r.attributes.aesthetic} />
-                ) : null}
-                {r.attributes.market_segment ? (
-                  <ReadRow label="Tier" value={r.attributes.market_segment} />
-                ) : null}
-                {r.attributes.notes ? (
-                  <ReadRow label="Notes" value={r.attributes.notes} />
-                ) : null}
-
-                {r.keywords.length ? (
-                  <View style={styles.miniChipRow}>
-                    {r.keywords.map((k) => (
-                      <View key={k} style={styles.miniChip}>
-                        <Text style={styles.miniChipText}>{k}</Text>
+              {report.keywords.length ? (
+                <>
+                  <View style={{ height: spacing.lg }} />
+                  <Kicker>Keywords ({report.keywords.length})</Kicker>
+                  <View style={styles.chipRow}>
+                    {report.keywords.map((k) => (
+                      <View key={k} style={styles.chip}>
+                        <Text style={styles.chipText}>{k}</Text>
                       </View>
                     ))}
                   </View>
-                ) : null}
-              </View>
-            ))}
-          </Card>
-        ) : null}
+                </>
+              ) : null}
 
-        <View style={styles.ctaRow}>
-          <Button
-            label="Export Report"
-            onPress={() => nav.navigate('Export', { report })}
-            style={{ flex: 1 }}
-          />
+              {report.brand_signals.some((s) => s.citations.length) ? (
+                <>
+                  <View style={{ height: spacing.lg }} />
+                  <Kicker>Brand Citations</Kicker>
+                  {report.brand_signals.filter((s) => s.citations.length).map((s) => (
+                    <View key={s.brand} style={styles.citeBlock}>
+                      <Text style={styles.citeBrand}>{s.brand}</Text>
+                      {s.citations.map((url, idx) => (
+                        <Pressable key={url + idx} onPress={() => Linking.openURL(url).catch(() => {})}>
+                          <Text style={styles.citeLink} numberOfLines={1}>
+                            {url.replace(/^https?:\/\//, '')}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  ))}
+                </>
+              ) : null}
+
+              <View style={{ height: spacing.lg }} />
+              <Kicker>Per-Image Reads ({report.reads.length})</Kicker>
+              {report.reads.map((r) => (
+                <View key={r.index} style={styles.readBlock}>
+                  <Text style={styles.readHead}>
+                    Image {r.index + 1} — {r.attributes.category || 'apparel'}
+                  </Text>
+                  {r.attributes.silhouette ? <ReadRow label="Silhouette" value={r.attributes.silhouette} /> : null}
+                  {r.attributes.fabric_guess ? <ReadRow label="Fabric" value={r.attributes.fabric_guess} /> : null}
+                  {r.attributes.colors.length ? <ReadRow label="Colors" value={r.attributes.colors.join(', ')} /> : null}
+                  {r.attributes.styling.length ? <ReadRow label="Styling" value={r.attributes.styling.join(', ')} /> : null}
+                  {r.attributes.trims.length ? <ReadRow label="Trims" value={r.attributes.trims.join(', ')} /> : null}
+                  {r.attributes.aesthetic ? <ReadRow label="Aesthetic" value={r.attributes.aesthetic} /> : null}
+                  {r.attributes.market_segment ? <ReadRow label="Tier" value={r.attributes.market_segment} /> : null}
+                  {r.attributes.notes ? <ReadRow label="Notes" value={r.attributes.notes} /> : null}
+                </View>
+              ))}
+            </Card>
+          ) : null}
+        </View>
+
+        <View style={[styles.padX, styles.ctaRow]}>
+          <Button label="Export Brief" onPress={() => nav.navigate('Export', { report })} style={{ flex: 1 }} />
         </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-// Best-effort named-color → hex. Falls back to a soft warm grey so the
-// swatch still renders as a coloured chip when the model returns a
-// niche trade name we don't have a mapping for.
+// ─── color helpers ───────────────────────────────────────────────
 const NAMED_COLORS: Record<string, string> = {
-  // neutrals
   'ecru': '#E8DFCB', 'cream': '#F1E8D1', 'off-white': '#F5F1E6', 'ivory': '#F6EFDB',
   'sand': '#D9C4A0', 'stone': '#B8AE9E', 'taupe': '#A89484', 'mushroom': '#A89C8A',
   'charcoal': '#3A3A38', 'jet': '#1A1A18', 'black': '#0F0F0E', 'white': '#FFFFFF',
-  // earth / rust
   'rust': '#A74C2A', 'terracotta': '#B96B47', 'burnt sienna': '#9D4A2A',
   'sienna': '#A0522D', 'brick': '#9C4A3B', 'clay': '#B07758', 'camel': '#B9925A',
   'tobacco': '#7A4A2D', 'umber': '#6B4423',
-  // greens
   'olive': '#6B6A2E', 'sage': '#9CAA8A', 'forest': '#2D4F3A', 'kerala green': '#1F5F4A',
   'moss': '#7A8A4A', 'mint': '#B5D4C3', 'fern': '#5B7A4A',
-  // blues
   'indigo': '#2D3E70', 'navy': '#1F2C4A', 'denim': '#4A6D8C', 'sky': '#8AB0CC',
   'cobalt': '#2D4FB8', 'rinse': '#243B5A', 'midnight': '#0F1B2E',
-  // warm / pink
   'blush': '#E8C2BC', 'rose': '#C77A7A', 'dusty rose': '#C4928D', 'coral': '#E37868',
   'salmon': '#E0866A', 'peach': '#F0BFA0',
-  // yellow / gold
   'mustard': '#C99B30', 'gold': '#C5A04B', 'ochre': '#C28A30', 'butter': '#E8D085',
-  // purple
   'plum': '#6B3A55', 'aubergine': '#3F2438', 'lavender': '#B7AAC8',
-  // red
   'red': '#B23A2E', 'burgundy': '#7A2A2A', 'wine': '#5C1F1F', 'tomato': '#C84A33',
-  // grey
   'grey': '#8A8780', 'gray': '#8A8780', 'dove': '#B7B3A8', 'graphite': '#4D4D49',
 };
 
 function colorToHex(name: string): string {
   const k = name.trim().toLowerCase();
   if (NAMED_COLORS[k]) return NAMED_COLORS[k];
-  // try a partial match against the longest key (e.g. "burnt sienna red" → "burnt sienna")
   for (const key of Object.keys(NAMED_COLORS).sort((a, b) => b.length - a.length)) {
     if (k.includes(key)) return NAMED_COLORS[key];
   }
@@ -349,10 +439,10 @@ function colorToHex(name: string): string {
 }
 
 const DIRECTION_META: Record<string, { tint: string; color: string; glyph: string }> = {
-  'Safe Commercial':     { tint: colors.safeTint,  color: colors.emerald, glyph: '◆' },
-  'Trend Forward':       { tint: colors.trendTint, color: colors.burgundy, glyph: '↗' },
-  'Differentiated Route':{ tint: colors.diffTint,  color: colors.text,    glyph: '★' },
-  fallback:              { tint: colors.surfaceMuted, color: colors.text, glyph: '◆' },
+  'Safe Commercial':      { tint: colors.safeTint,    color: colors.emerald,  glyph: '◆' },
+  'Trend Forward':        { tint: colors.trendTint,   color: colors.burgundy, glyph: '↗' },
+  'Differentiated Route': { tint: colors.diffTint,    color: colors.text,     glyph: '★' },
+  fallback:               { tint: colors.surfaceMuted, color: colors.text,    glyph: '◆' },
 };
 
 function ReadRow({ label, value }: { label: string; value: string }) {
@@ -364,144 +454,234 @@ function ReadRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+// ─── styles ──────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  scroll: { paddingHorizontal: spacing.xl, paddingBottom: spacing.xxxl },
-  exportLink: { ...type.bodySm, color: colors.emerald, fontWeight: '600' },
+  scroll: { paddingBottom: spacing.xxxl },
+  padX: { paddingHorizontal: spacing.xl },
 
-  heroRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.lg },
-  heroText: { flex: 1, marginLeft: spacing.lg },
-  observation: { ...type.h1, color: colors.text, marginTop: spacing.xs },
-  summary: { ...type.body, color: colors.textMuted, marginBottom: spacing.sm },
-
-  // Brand grid
-  brandGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.md,
-    marginTop: spacing.md,
+  // HERO
+  hero: { width: '100%', height: HERO_HEIGHT, backgroundColor: colors.text, position: 'relative' },
+  heroImg: { ...StyleSheet.absoluteFillObject, width: '100%', height: HERO_HEIGHT },
+  heroFallback: { backgroundColor: colors.emeraldDeep },
+  heroOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,15,14,0.45)',
   },
+  heroChromeWrap: { position: 'absolute', top: 0, left: 0, right: 0 },
+  heroChrome: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: spacing.lg, paddingTop: spacing.md,
+  },
+  heroBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  heroBtnWide: {
+    paddingHorizontal: spacing.md, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center', justifyContent: 'center', flexDirection: 'row',
+  },
+  heroBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
+  heroBottom: {
+    position: 'absolute', left: 0, right: 0, bottom: 0,
+    paddingHorizontal: spacing.xl, paddingBottom: spacing.xl,
+  },
+  heroKicker: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 11, letterSpacing: 1.8, fontWeight: '600', marginBottom: spacing.sm,
+  },
+  heroObservation: {
+    color: '#fff', fontSize: 34, lineHeight: 38, fontWeight: '700', letterSpacing: -0.8,
+  },
+  heroSummary: {
+    color: 'rgba(255,255,255,0.85)', fontSize: 14, lineHeight: 20, marginTop: spacing.sm,
+  },
+
+  // Thumb strip beneath hero
+  thumbStrip: {
+    paddingHorizontal: spacing.xl, paddingTop: spacing.md, gap: spacing.sm,
+  },
+  thumbStripImg: {
+    width: 56, height: 56, borderRadius: radii.sm,
+    backgroundColor: colors.surfaceMuted,
+  },
+  thumbStripMore: { alignItems: 'center', justifyContent: 'center' },
+  thumbStripMoreText: { ...type.bodySm, fontWeight: '600', color: colors.textMuted },
+
+  // Section header
+  sectionLabelRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    marginTop: spacing.xxl, marginBottom: spacing.md,
+  },
+  accentBar: { width: 24, height: 2, backgroundColor: colors.emerald },
+  sectionLabel: {
+    fontSize: 11, letterSpacing: 1.6, fontWeight: '700', color: colors.text,
+    textTransform: 'uppercase',
+  },
+  sectionSub: { ...type.bodySm, color: colors.textMuted, marginTop: -spacing.xs, marginBottom: spacing.md },
+
+  // Why-now card (big editorial quote)
+  whyCard: {
+    backgroundColor: colors.text,
+    borderRadius: radii.lg,
+    padding: spacing.xl,
+    marginBottom: spacing.md,
+  },
+  whyKicker: {
+    fontSize: 10, letterSpacing: 1.8, fontWeight: '700',
+    color: colors.bg, opacity: 0.6, marginBottom: spacing.sm,
+  },
+  whyText: { color: colors.bg, fontSize: 18, lineHeight: 26, fontWeight: '500' },
+
+  // Consumer card
+  consumerCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    padding: spacing.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.divider,
+  },
+  consumerKicker: {
+    fontSize: 10, letterSpacing: 1.6, fontWeight: '700',
+    color: colors.textSubtle, marginBottom: spacing.sm,
+  },
+  consumerText: { ...type.body, color: colors.text, lineHeight: 24 },
+
+  // Commentary
+  commentaryText: { ...type.body, color: colors.text, lineHeight: 24 },
+
+  // Brand carousel
+  brandStrip: { paddingRight: spacing.xl, gap: spacing.md, paddingVertical: spacing.sm },
   brandCard: {
-    width: '47%',
+    width: 232,
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.divider,
+    minHeight: 168,
+  },
+  brandCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  brandCardNum: {
+    ...type.caption, color: colors.textSubtle, fontSize: 10, letterSpacing: 1,
+  },
+  brandCardName: {
+    fontSize: 22, fontWeight: '700', color: colors.text,
+    letterSpacing: -0.4, marginTop: spacing.md,
+  },
+  brandCardRationale: {
+    ...type.bodySm, color: colors.textMuted,
+    marginTop: spacing.sm, lineHeight: 18,
+  },
+
+  // Price ladder
+  ladderRow: {
+    flexDirection: 'row', alignItems: 'stretch', gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  ladderCol: {
+    flex: 1, padding: spacing.md, borderRadius: radii.md, minHeight: 110,
+  },
+  ladderColAnchor: { backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.divider },
+  ladderColFloor:  { backgroundColor: colors.surfaceMuted },
+  ladderColTarget: { backgroundColor: colors.emerald },
+  ladderArrow: { alignItems: 'center', justifyContent: 'center', width: 14 },
+  ladderArrowText: { color: colors.textSubtle, fontSize: 18 },
+  ladderTag: {
+    fontSize: 9, letterSpacing: 1.2, fontWeight: '700',
+    color: colors.textSubtle, marginBottom: spacing.sm,
+  },
+  ladderValue: { fontSize: 16, fontWeight: '700', color: colors.text, letterSpacing: -0.2 },
+  ladderSub: { ...type.bodySm, fontSize: 11, color: colors.textMuted, marginTop: spacing.xs },
+  ladderProse: {
+    ...type.bodySm, color: colors.text, lineHeight: 20,
+    marginTop: spacing.lg, paddingLeft: spacing.md,
+    borderLeftWidth: 2, borderLeftColor: colors.emerald,
+  },
+
+  // India play
+  indiaPlayCard: {
+    marginTop: spacing.xl,
+    backgroundColor: colors.emeraldSoft,
+    borderRadius: radii.lg,
+    padding: spacing.xl,
+    borderLeftWidth: 4, borderLeftColor: colors.emerald,
+  },
+  indiaPlayKicker: {
+    fontSize: 10, letterSpacing: 1.8, fontWeight: '700',
+    color: colors.emeraldDeep, marginBottom: spacing.sm,
+  },
+  indiaPlayText: { ...type.body, color: colors.text, lineHeight: 24 },
+
+  // Palette
+  paletteStrip: { paddingRight: spacing.xl, gap: spacing.md, paddingVertical: spacing.sm },
+  swatchWrap: { width: 76, alignItems: 'flex-start' },
+  swatch: {
+    width: 76, height: 92, borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: colors.divider,
+  },
+  swatchLabel: { ...type.bodySm, fontSize: 12, fontWeight: '600', color: colors.text, marginTop: 8 },
+  swatchHex: { ...type.bodySm, fontSize: 10, color: colors.textSubtle, marginTop: 2, letterSpacing: 0.4 },
+
+  // Ops (production + merchandising)
+  opsRow: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: spacing.md, marginTop: spacing.sm,
+  },
+  opsCol: {
+    flex: 1,
     backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.divider,
-    minHeight: 132,
+    borderTopWidth: 3, borderTopColor: colors.text,
   },
-  brandWordmark: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text,
-    letterSpacing: -0.4,
+  opsKicker: {
+    fontSize: 10, letterSpacing: 1.6, fontWeight: '700',
+    color: colors.textMuted, marginBottom: spacing.sm,
   },
-  brandCardRationale: {
-    ...type.bodySm,
-    fontSize: 12,
-    color: colors.textMuted,
-    marginTop: spacing.sm,
-    lineHeight: 17,
-  },
+  opsText: { ...type.body, color: colors.text, lineHeight: 22 },
 
-  commentary: { ...type.body, color: colors.text, marginTop: spacing.sm, lineHeight: 24 },
-
-  // Tinted direction cards
-  dirCard: {
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-  },
-  dirCardHead: { flexDirection: 'row', alignItems: 'center' },
-  dirCardLabel: { ...type.caption, letterSpacing: 1.2 },
-  dirCardTitle: { ...type.h2, color: colors.text, marginTop: spacing.xs },
-  dirCardDesc: { ...type.body, color: colors.text, marginTop: spacing.xs, opacity: 0.85 },
-  dirMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: spacing.md },
+  // Direction cards
+  dirCard: { borderRadius: radii.lg, padding: spacing.xl, marginBottom: spacing.md },
+  dirCardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  dirCardGlyph: { fontSize: 18 },
+  dirCardLabel: { ...type.caption, letterSpacing: 1.4, fontSize: 10, fontWeight: '700' },
+  dirCardTitle: { ...type.h2, color: colors.text, marginTop: spacing.sm, fontSize: 22 },
+  dirCardDesc: { ...type.body, color: colors.text, marginTop: spacing.sm, opacity: 0.85, lineHeight: 22 },
+  dirMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: spacing.lg },
   dirMetaPill: {
-    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.6)',
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.7)',
   },
   dirMetaText: { ...type.bodySm, fontSize: 11, color: colors.text, fontWeight: '500' },
 
-  // Palette swatches
-  paletteRow: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md,
-    marginTop: spacing.md,
-  },
-  swatchWrap: { alignItems: 'flex-start', minWidth: 64 },
-  swatch: {
-    width: 56, height: 56, borderRadius: radii.sm,
+  // Detail drawer
+  detailToggle: { alignSelf: 'center', paddingVertical: spacing.xl },
+  detailToggleText: { ...type.bodySm, color: colors.emerald, fontWeight: '600' },
+  detailCard: { backgroundColor: colors.surfaceMuted, borderRadius: radii.md, padding: spacing.lg },
+  metaLine: { ...type.bodySm, color: colors.text, marginTop: spacing.xs },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: spacing.sm },
+  chip: {
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999,
+    backgroundColor: colors.bg,
     borderWidth: StyleSheet.hairlineWidth, borderColor: colors.divider,
   },
-  swatchLabel: { ...type.bodySm, fontSize: 11, color: colors.text, marginTop: 6 },
-
-  // Price strategy callout
-  priceCard: { backgroundColor: colors.emeraldSoft },
-  priceText: { ...type.body, color: colors.text, marginTop: spacing.sm, lineHeight: 22 },
-
-  // Production / Merchandising
-  subBlockText: { ...type.body, color: colors.text, marginTop: spacing.sm, lineHeight: 22 },
-
-  detailToggle: { alignSelf: 'center', paddingVertical: spacing.lg },
-  detailToggleText: { ...type.bodySm, color: colors.emerald, textDecorationLine: 'underline' },
-
-  detailCard: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-  },
-  kwLine: { ...type.bodySm, color: colors.text, marginTop: spacing.xs },
-  metaLine: { ...type.bodySm, color: colors.text, marginTop: spacing.xs },
-
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: spacing.sm,
-  },
-  chip: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: colors.bg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.divider,
-  },
   chipText: { ...type.bodySm, fontSize: 11, color: colors.text },
-
-  miniChipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-    marginTop: spacing.sm,
-  },
-  miniChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 999,
-    backgroundColor: colors.bg,
-  },
-  miniChipText: { ...type.bodySm, fontSize: 10, color: colors.textMuted },
-
   citeBlock: { marginTop: spacing.sm },
   citeBrand: { ...type.bodySm, fontWeight: '600', color: colors.text },
   citeLink: { ...type.bodySm, fontSize: 11, color: colors.emerald, textDecorationLine: 'underline', marginTop: 2 },
-
-  readBlock: {
-    paddingVertical: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.divider,
-    marginTop: spacing.sm,
-  },
+  readBlock: { paddingVertical: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider, marginTop: spacing.sm },
   readHead: { ...type.h3, color: colors.text, marginBottom: spacing.xs },
   readRow: { flexDirection: 'row', marginTop: 4 },
   readRowLabel: { ...type.bodySm, fontSize: 11, color: colors.textSubtle, width: 80, textTransform: 'uppercase', letterSpacing: 0.5 },
   readRowValue: { ...type.bodySm, color: colors.text, flex: 1 },
 
-  ctaRow: { flexDirection: 'row', marginTop: spacing.lg, gap: spacing.md },
+  ctaRow: { marginTop: spacing.xl },
 
-  // Per-category breakdown
-  byCatLead: { ...type.bodySm, color: colors.textMuted, marginTop: spacing.sm, marginBottom: spacing.sm },
+  // Per-category
+  byCatLead: { ...type.bodySm, color: colors.textMuted, marginBottom: spacing.sm },
   groupHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   groupLabel: { ...type.h2, color: colors.text },
   groupCount: { ...type.bodySm, fontSize: 11, color: colors.textSubtle, textTransform: 'uppercase', letterSpacing: 0.6 },
@@ -511,8 +691,4 @@ const styles = StyleSheet.create({
   groupBrandRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   groupBrandName: { ...type.body, color: colors.text },
   groupCommentary: { ...type.bodySm, color: colors.text, marginTop: spacing.md, lineHeight: 22 },
-  groupDirections: { marginTop: spacing.md, gap: spacing.sm },
-  groupDirRow: { paddingTop: spacing.xs },
-  groupDirLabel: { ...type.caption, color: colors.burgundy, letterSpacing: 0.8, fontSize: 10 },
-  groupDirTitle: { ...type.bodySm, fontWeight: '600', color: colors.text, marginTop: 2 },
 });

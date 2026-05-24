@@ -94,6 +94,13 @@ export type AnalysisReport = {
   price_strategy?: string;
   production_notes?: string;
   merchandising?: string;
+  // Phase 5: India-translation depth
+  consumer?: string;
+  why_now?: string;
+  india_play?: string;
+  price_anchor_inr?: string;
+  price_floor_inr?: string;
+  price_target_inr?: string;
 };
 
 export type UploadImage = { uri: string; name: string; mime: string };

@@ -143,8 +143,31 @@ def render(report: AnalysisReport, *, images: list[bytes] | None = None) -> byte
         story.append(tbl)
 
     if report.commentary:
-        story.append(Paragraph("MARKET COMMENTARY", s["section"]))
+        story.append(Paragraph("THE READ", s["section"]))
         story.append(Paragraph(report.commentary, s["body"]))
+
+    if report.why_now:
+        story.append(Paragraph("WHY NOW", s["section"]))
+        story.append(Paragraph(report.why_now, s["body"]))
+
+    if report.consumer:
+        story.append(Paragraph("CONSUMER · OCCASION", s["section"]))
+        story.append(Paragraph(report.consumer, s["body"]))
+
+    if report.india_play:
+        story.append(Paragraph("HOW TO LAUNCH IN INDIA", s["section"]))
+        story.append(Paragraph(report.india_play, s["body"]))
+
+    if report.price_anchor_inr or report.price_floor_inr or report.price_target_inr:
+        story.append(Paragraph("PRICE LADDER", s["section"]))
+        ladder_bits = []
+        if report.price_anchor_inr:
+            ladder_bits.append(f"<b>Anchor</b>: {report.price_anchor_inr}")
+        if report.price_floor_inr:
+            ladder_bits.append(f"<b>Floor</b>: {report.price_floor_inr}")
+        if report.price_target_inr:
+            ladder_bits.append(f"<b>Target MRP</b>: {report.price_target_inr}")
+        story.append(Paragraph(" &nbsp;·&nbsp; ".join(ladder_bits), s["body"]))
 
     if report.palette:
         story.append(Paragraph("PALETTE", s["section"]))
