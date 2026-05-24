@@ -25,7 +25,7 @@ from app.schemas import (
     ExportResponse,
 )
 from app.services import pdf as pdf_service
-from app.services import pipeline, reports
+from app.services import image_cache, pipeline, reports
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("signal")
@@ -89,15 +89,19 @@ async def analyze(images: list[UploadFile] = File(...)) -> AnalysisReport:
             raise HTTPException(400, f"unreadable image: {f.filename}")
 
     try:
-        return await pipeline.analyze(blobs)
+        report = await pipeline.analyze(blobs)
     except Exception as e:
         log.exception("pipeline failure")
         raise HTTPException(500, f"analysis failed: {e}") from e
+    # Cache normalized blobs so /export-report can embed them in the PDF.
+    image_cache.put(report.id, blobs)
+    return report
 
 
 @app.post("/export-report", response_model=ExportResponse)
 async def export_report(req: ExportRequest) -> ExportResponse:
-    pdf_bytes = pdf_service.render(req.report)
+    images = image_cache.get(req.report.id) or []
+    pdf_bytes = pdf_service.render(req.report, images=images)
     reports.save(req.report.id, pdf_bytes)
     base = get_settings().resolved_base_url.rstrip("/")
     return ExportResponse(
@@ -123,7 +127,8 @@ async def email_report(req: EmailRequest) -> EmailResponse:
     """Stubbed: instead of sending mail we return the download link.
     The mobile client can share it via the OS share sheet.
     """
-    pdf_bytes = pdf_service.render(req.report)
+    images = image_cache.get(req.report.id) or []
+    pdf_bytes = pdf_service.render(req.report, images=images)
     reports.save(req.report.id, pdf_bytes)
     base = get_settings().resolved_base_url.rstrip("/")
     link = f"{base}/reports/{req.report.id}"

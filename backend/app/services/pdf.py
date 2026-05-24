@@ -9,14 +9,19 @@ from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import (
+    Image as RLImage,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
     Table,
     TableStyle,
 )
+from PIL import Image as PILImage
 
 from app.schemas import AnalysisReport
+
+MAX_EMBEDDED_IMAGES = 10
+THUMB_SIZE = 1.7 * 72  # 1.7 inches in points
 
 
 CHARCOAL = colors.HexColor("#1F1F1D")
@@ -83,7 +88,7 @@ def _similarity_color(sim: str) -> colors.Color:
     }.get(sim, STONE)
 
 
-def render(report: AnalysisReport) -> bytes:
+def render(report: AnalysisReport, *, images: list[bytes] | None = None) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=LETTER,
@@ -100,6 +105,13 @@ def render(report: AnalysisReport) -> bytes:
         f"{mode_label} &middot; {report.image_count} image{'s' if report.image_count != 1 else ''}",
         s["kicker"],
     ))
+
+    # Image gallery: top N inputs as a tidy grid, before the brief.
+    if images:
+        thumb_block = _image_grid(images[:MAX_EMBEDDED_IMAGES])
+        if thumb_block is not None:
+            story.append(Paragraph("INPUT IMAGES", s["section"]))
+            story.append(thumb_block)
 
     story.append(Paragraph("OBSERVATION", s["section"]))
     story.append(Paragraph(report.observation, s["observation"]))
@@ -153,3 +165,36 @@ def render(report: AnalysisReport) -> bytes:
 
     doc.build(story)
     return buf.getvalue()
+
+
+def _image_grid(images: list[bytes]) -> Table | None:
+    """Lay images out 4 per row, square thumbnails. Skip any that fail to decode."""
+    cells: list[RLImage] = []
+    for raw in images:
+        try:
+            # ReportLab needs a seekable stream; downsizing keeps PDFs small.
+            buf = io.BytesIO()
+            with PILImage.open(io.BytesIO(raw)) as im:
+                im = im.convert("RGB")
+                im.thumbnail((400, 400))
+                im.save(buf, "JPEG", quality=80, optimize=True)
+            buf.seek(0)
+            cells.append(RLImage(buf, width=THUMB_SIZE, height=THUMB_SIZE, kind="proportional"))
+        except Exception:
+            continue
+    if not cells:
+        return None
+    cols = 4
+    rows = [cells[i:i + cols] for i in range(0, len(cells), cols)]
+    # Pad final row so the Table is rectangular
+    if rows and len(rows[-1]) < cols:
+        rows[-1] += [""] * (cols - len(rows[-1]))
+    tbl = Table(rows, colWidths=[THUMB_SIZE + 6] * cols)
+    tbl.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    return tbl
